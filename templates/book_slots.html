@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Book - EasyBook</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body class="bg-light">
+  <div class="container py-5">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <h1 class="m-0">Book an Appointment</h1>
+      <a class="btn btn-danger" href="/logout">Logout</a>
+    </div>
+
+    {% if error %}
+      <div class="alert alert-danger">{{ error }}</div>
+    {% endif %}
+
+    <form class="row g-2 mb-4" method="GET" action="/book">
+      <div class="col-auto">
+        <label class="form-label">Select date</label>
+        <input class="form-control" type="date" name="date" value="{{ selected_date }}">
+      </div>
+      <div class="col-auto align-self-end">
+        <button class="btn btn-primary">Show Slots</button>
+      </div>
+    </form>
+
+    <h5>Available slots for {{ selected_date }}</h5>
+
+    {% if slots|length == 0 %}
+      <p class="text-muted">No available slots for this date.</p>
+    {% else %}
+      <div class="d-flex flex-wrap gap-2">
+        {% for slot in slots %}
+          <form method="POST" action="/book">
+            <input type="hidden" name="start_at" value="{{ slot.isoformat() }}">
+            <button class="btn btn-outline-primary">
+              {{ slot.strftime("%I:%M %p") }}
+            </button>
+          </form>
+        {% endfor %}
+      </div>
+    {% endif %}
+
+    <div class="mt-4">
+      <a href="/user" class="btn btn-secondary">Back</a>
+    </div>
+  </div>
+</body>
+</html>

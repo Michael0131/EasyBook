@@ -1,8 +1,54 @@
 from functools import wraps
 from flask import Flask, render_template, request, redirect, url_for, session
+from flask_sqlalchemy import SQLAlchemy
+from flask_migrate import Migrate
+from werkzeug.security import generate_password_hash
+from werkzeug.security import check_password_hash
 
-app = Flask(__name__)
+
+import os
+
+app = Flask(__name__, instance_relative_config=True)
 app.secret_key = "easybook-dev-key"
+
+db_path = os.path.join(app.instance_path, "easybook.db")
+os.makedirs(app.instance_path, exist_ok=True)
+
+app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{db_path}"
+
+app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+
+db = SQLAlchemy(app)
+migrate = Migrate(app, db)
+
+class Account(db.Model):
+    __tablename__ = "accounts"
+
+    id = db.Column(db.Integer, primary_key=True)
+    email = db.Column(db.String(255), unique=True, nullable=False)
+    password_hash = db.Column(db.String(255), nullable=False)
+    role = db.Column(db.String(20), nullable=False)  # "user", "business", "admin"
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
+
+
+class Appointment(db.Model):
+    __tablename__ = "appointments"
+
+    id = db.Column(db.Integer, primary_key=True)
+
+    # Which user booked it
+    user_id = db.Column(db.Integer, db.ForeignKey("accounts.id"), nullable=False)
+
+    start_at = db.Column(db.DateTime, nullable=False)
+    end_at = db.Column(db.DateTime, nullable=False)
+
+    status = db.Column(db.String(20), nullable=False, default="scheduled")
+    created_at = db.Column(db.DateTime, nullable=False, server_default=db.func.now())
+
+    user = db.relationship("Account", backref="appointments")
+
+
+
 
 
 def require_role(*roles):
@@ -28,28 +74,75 @@ def login():
     error = None
 
     if request.method == "POST":
-        username = request.form.get("username", "")
+        email = request.form.get("email", "").strip().lower()
         password = request.form.get("password", "")
 
-        # Temporary hardcoded accounts (replace with DB later)
-        if username == "admin" and password == "password123":
-            session.clear()
-            session["role"] = "admin"
-            return redirect(url_for("admin_dashboard"))
+        account = Account.query.filter_by(email=email, is_active=True).first()
 
-        if username == "business" and password == "business123":
+        if account and check_password_hash(account.password_hash, password):
             session.clear()
-            session["role"] = "business"
-            return redirect(url_for("business_dashboard"))
+            session["role"] = account.role
+            session["account_id"] = account.id
 
-        if username == "user" and password == "user123":
-            session.clear()
-            session["role"] = "user"
-            return redirect(url_for("user_home"))
+            if account.role == "admin":
+                return redirect(url_for("admin_dashboard"))
+            if account.role == "business":
+                return redirect(url_for("business_dashboard"))
+            if account.role == "user":
+                return redirect(url_for("user_home"))
 
-        error = "Invalid username or password."
+            error = "Account role is not configured."
+        else:
+            error = "Invalid email or password."
 
     return render_template("login.html", error=error)
+
+
+
+# Debug, can be deleted whenever - MUST BE DELETED BEFORE PRODUCTION
+@app.route("/whoami")
+def whoami():
+    return {
+        "role": session.get("role"),
+        "account_id": session.get("account_id")
+    }
+
+# --- REGISTER ----- 
+@app.route("/register", methods=["GET", "POST"])
+def register():
+    error = None
+
+    if request.method == "POST":
+        email = request.form.get("email", "").strip().lower()
+        password = request.form.get("password", "")
+
+        if not email or not password:
+            error = "Email and password are required."
+            return render_template("register.html", error=error)
+
+        existing = Account.query.filter_by(email=email).first()
+        if existing:
+            error = "That email is already registered."
+            return render_template("register.html", error=error)
+
+        user = Account(
+            email=email,
+            password_hash=generate_password_hash(password),
+            role="user",
+            is_active=True
+        )
+        db.session.add(user)
+        db.session.commit()
+
+        # Log the new user in immediately
+        session.clear()
+        session["role"] = "user"
+        session["account_id"] = user.id
+
+        return redirect(url_for("user_home"))
+
+    return render_template("register.html", error=error)
+
 
 
 @app.route("/logout")
@@ -58,9 +151,87 @@ def logout():
     return redirect(url_for("login"))
 
 
-@app.route("/book")
+from datetime import datetime, timedelta, time  # make sure this import exists at top
+
+@app.route("/book", methods=["GET", "POST"])
+@require_role("user")
 def book():
-    return render_template("book.html")
+    error = None
+    selected_date = request.args.get("date")  # YYYY-MM-DD
+
+    # Default business hours for now (we'll move this to DB soon)
+    BUSINESS_START = time(9, 0)
+    BUSINESS_END = time(17, 0)
+
+    APPT_MINUTES = 30  # fixed duration for now
+    SLOT_STEP_MINUTES = 30  # slot size
+
+    # If user clicks a slot button, it posts start_at ISO string
+    if request.method == "POST":
+        start_str = request.form.get("start_at", "")
+        if not start_str:
+            return redirect(url_for("book"))
+
+        try:
+            start_at = datetime.fromisoformat(start_str)
+        except ValueError:
+            error = "Invalid time selected."
+            start_at = None
+
+        if start_at:
+            end_at = start_at + timedelta(minutes=APPT_MINUTES)
+
+            # Simple conflict check: exact same start time already booked & scheduled
+            existing = Appointment.query.filter_by(start_at=start_at, status="scheduled").first()
+            if existing:
+                error = "Sorry, that slot was just booked. Please choose another."
+            else:
+                user_id = session.get("account_id")
+                appt = Appointment(
+                    user_id=user_id,
+                    start_at=start_at,
+                    end_at=end_at,
+                    status="scheduled"
+                )
+                db.session.add(appt)
+                db.session.commit()
+                return render_template("booking_success.html", start_at=start_at)
+
+    # Build slot list for selected_date (default: today)
+    if not selected_date:
+        selected_date = datetime.now().date().isoformat()
+
+    try:
+        day = datetime.fromisoformat(selected_date).date()
+    except ValueError:
+        day = datetime.now().date()
+        selected_date = day.isoformat()
+
+    day_start = datetime.combine(day, BUSINESS_START)
+    day_end = datetime.combine(day, BUSINESS_END)
+
+    # Fetch already-booked start times for this day (scheduled only)
+    booked = Appointment.query.filter(
+        Appointment.start_at >= day_start,
+        Appointment.start_at < day_end,
+        Appointment.status == "scheduled"
+    ).all()
+    booked_starts = {a.start_at for a in booked}
+
+    # Generate slots
+    slots = []
+    cur = day_start
+    while cur + timedelta(minutes=APPT_MINUTES) <= day_end:
+        if cur not in booked_starts:
+            slots.append(cur)
+        cur += timedelta(minutes=SLOT_STEP_MINUTES)
+
+    return render_template(
+        "book_slots.html",
+        selected_date=selected_date,
+        slots=slots,
+        error=error
+    )
 
 
 # ---- User Area ----
@@ -82,6 +253,37 @@ def business_dashboard():
 @require_role("admin")
 def admin_dashboard():
     return render_template("admin_dashboard.html")
+
+
+
+
+
+@app.route("/seed")
+def seed():
+    # Only seed if table is empty to avoid duplicates
+    if Account.query.first():
+        return "Seed already done."
+
+    admin = Account(
+        email="admin@easybook.com",
+        password_hash=generate_password_hash("password123"),
+        role="admin",
+        is_active=True
+    )
+
+    business = Account(
+        email="business@easybook.com",
+        password_hash=generate_password_hash("business123"),
+        role="business",
+        is_active=True
+    )
+
+    db.session.add(admin)
+    db.session.add(business)
+    db.session.commit()
+
+    return "Seeded admin and business."
+
 
 
 if __name__ == "__main__":
