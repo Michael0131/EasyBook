@@ -6,6 +6,12 @@ This project was developed as a senior capstone project to demonstrate full-stac
 
 ---
 
+Start venv environment
+
+venv\Scripts\Activate.ps1
+
+
+
 ## Key Features
 
 - View available appointment dates and time slots  

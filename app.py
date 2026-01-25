@@ -4,7 +4,7 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
 from werkzeug.security import generate_password_hash
 from werkzeug.security import check_password_hash
-
+from datetime import time
 
 import os
 
@@ -47,7 +47,14 @@ class Appointment(db.Model):
 
     user = db.relationship("Account", backref="appointments")
 
+class BusinessHour(db.Model):
+    __tablename__ = "business_hours"
 
+    id = db.Column(db.Integer, primary_key=True)
+    weekday = db.Column(db.Integer, nullable=False, unique=True)  # 0=Mon ... 6=Sun
+    start_time = db.Column(db.Time, nullable=False)
+    end_time = db.Column(db.Time, nullable=False)
+    is_closed = db.Column(db.Boolean, nullable=False, default=False)
 
 
 
@@ -142,6 +149,59 @@ def register():
         return redirect(url_for("user_home"))
 
     return render_template("register.html", error=error)
+
+@app.route("/business/hours", methods=["GET", "POST"])
+@require_role("business")
+def business_hours():
+    # Map 0..6 to labels
+    day_names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+
+    if request.method == "POST":
+        for i in range(7):
+            closed = request.form.get(f"closed_{i}") == "on"
+            start_str = request.form.get(f"start_{i}", "")
+            end_str = request.form.get(f"end_{i}", "")
+
+            row = BusinessHour.query.filter_by(weekday=i).first()
+            if not row:
+                row = BusinessHour(weekday=i, start_time=time(9, 0), end_time=time(17, 0), is_closed=False)
+                db.session.add(row)
+
+            if closed:
+                row.is_closed = True
+                # keep times as-is (ignored when closed)
+            else:
+                row.is_closed = False
+                # Parse HH:MM
+                h1, m1 = start_str.split(":")
+                h2, m2 = end_str.split(":")
+                row.start_time = time(int(h1), int(m1))
+                row.end_time = time(int(h2), int(m2))
+
+        db.session.commit()
+        return redirect(url_for("business_hours"))
+
+    # GET: build default rows if missing
+    rows = {bh.weekday: bh for bh in BusinessHour.query.all()}
+    hours = []
+    for i in range(7):
+        bh = rows.get(i)
+        if not bh:
+            # default: open weekdays 9-5, closed weekends
+            default_closed = i in (5, 6)
+            bh = BusinessHour(
+                weekday=i,
+                start_time=time(9, 0),
+                end_time=time(17, 0),
+                is_closed=default_closed
+            )
+            db.session.add(bh)
+            db.session.commit()
+
+        hours.append({"weekday": i, "name": day_names[i], "row": bh})
+
+    return render_template("business_hours.html", hours=hours)
+
 
 
 
