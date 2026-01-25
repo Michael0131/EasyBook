@@ -153,8 +153,13 @@ def register():
 @app.route("/business/hours", methods=["GET", "POST"])
 @require_role("business")
 def business_hours():
-    # Map 0..6 to labels
     day_names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+
+    def parse_time_or_none(value: str):
+        if not value or ":" not in value:
+            return None
+        h, m = value.split(":")
+        return time(int(h), int(m))
 
     if request.method == "POST":
         for i in range(7):
@@ -164,31 +169,43 @@ def business_hours():
 
             row = BusinessHour.query.filter_by(weekday=i).first()
             if not row:
-                row = BusinessHour(weekday=i, start_time=time(9, 0), end_time=time(17, 0), is_closed=False)
+                # default row if missing
+                row = BusinessHour(
+                    weekday=i,
+                    start_time=time(9, 0),
+                    end_time=time(17, 0),
+                    is_closed=False
+                )
                 db.session.add(row)
 
             if closed:
                 row.is_closed = True
-                # keep times as-is (ignored when closed)
+                # times remain as-is (ignored when closed)
             else:
                 row.is_closed = False
-                # Parse HH:MM
-                h1, m1 = start_str.split(":")
-                h2, m2 = end_str.split(":")
-                row.start_time = time(int(h1), int(m1))
-                row.end_time = time(int(h2), int(m2))
+
+                parsed_start = parse_time_or_none(start_str)
+                parsed_end = parse_time_or_none(end_str)
+
+                # If inputs were missing (disabled previously), keep existing times or defaults
+                if parsed_start is None:
+                    parsed_start = row.start_time or time(9, 0)
+                if parsed_end is None:
+                    parsed_end = row.end_time or time(17, 0)
+
+                row.start_time = parsed_start
+                row.end_time = parsed_end
 
         db.session.commit()
         return redirect(url_for("business_hours"))
 
-    # GET: build default rows if missing
+    # GET: ensure rows exist
     rows = {bh.weekday: bh for bh in BusinessHour.query.all()}
     hours = []
     for i in range(7):
         bh = rows.get(i)
         if not bh:
-            # default: open weekdays 9-5, closed weekends
-            default_closed = i in (5, 6)
+            default_closed = i in (5, 6)  # Sat/Sun
             bh = BusinessHour(
                 weekday=i,
                 start_time=time(9, 0),
@@ -201,7 +218,6 @@ def business_hours():
         hours.append({"weekday": i, "name": day_names[i], "row": bh})
 
     return render_template("business_hours.html", hours=hours)
-
 
 
 
