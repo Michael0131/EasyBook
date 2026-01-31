@@ -4,7 +4,7 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
 from werkzeug.security import generate_password_hash
 from werkzeug.security import check_password_hash
-from datetime import time
+from datetime import time, datetime, timedelta
 
 import os
 
@@ -235,14 +235,12 @@ def book():
     error = None
     selected_date = request.args.get("date")  # YYYY-MM-DD
 
-    # Default business hours for now (we'll move this to DB soon)
-    BUSINESS_START = time(9, 0)
-    BUSINESS_END = time(17, 0)
+    APPT_MINUTES = 30
+    SLOT_STEP_MINUTES = 30
 
-    APPT_MINUTES = 30  # fixed duration for now
-    SLOT_STEP_MINUTES = 30  # slot size
-
-    # If user clicks a slot button, it posts start_at ISO string
+    # -------------------------
+    # POST: book a selected slot
+    # -------------------------
     if request.method == "POST":
         start_str = request.form.get("start_at", "")
         if not start_str:
@@ -257,8 +255,11 @@ def book():
         if start_at:
             end_at = start_at + timedelta(minutes=APPT_MINUTES)
 
-            # Simple conflict check: exact same start time already booked & scheduled
-            existing = Appointment.query.filter_by(start_at=start_at, status="scheduled").first()
+            existing = Appointment.query.filter_by(
+                start_at=start_at,
+                status="scheduled"
+            ).first()
+
             if existing:
                 error = "Sorry, that slot was just booked. Please choose another."
             else:
@@ -273,7 +274,9 @@ def book():
                 db.session.commit()
                 return render_template("booking_success.html", start_at=start_at)
 
-    # Build slot list for selected_date (default: today)
+    # -------------------------
+    # GET: show available slots
+    # -------------------------
     if not selected_date:
         selected_date = datetime.now().date().isoformat()
 
@@ -283,10 +286,44 @@ def book():
         day = datetime.now().date()
         selected_date = day.isoformat()
 
-    day_start = datetime.combine(day, BUSINESS_START)
-    day_end = datetime.combine(day, BUSINESS_END)
+    # 1) Date override check (priority)
+    ov = AvailabilityOverride.query.filter_by(date=day).first()
+    if ov:
+        if ov.is_closed:
+            return render_template("book_slots.html", selected_date=selected_date, slots=[], error=None)
 
-    # Fetch already-booked start times for this day (scheduled only)
+        # If override is open, it must have times
+        if not ov.start_time or not ov.end_time or ov.end_time <= ov.start_time:
+            return render_template(
+                "book_slots.html",
+                selected_date=selected_date,
+                slots=[],
+                error="Business override hours are not configured correctly for this date."
+            )
+
+        day_start = datetime.combine(day, ov.start_time)
+        day_end = datetime.combine(day, ov.end_time)
+
+    else:
+        # 2) Fall back to weekly schedule
+        weekday = day.weekday()  # 0=Mon ... 6=Sun
+        bh = BusinessHour.query.filter_by(weekday=weekday).first()
+
+        if not bh or bh.is_closed:
+            return render_template("book_slots.html", selected_date=selected_date, slots=[], error=None)
+
+        day_start = datetime.combine(day, bh.start_time)
+        day_end = datetime.combine(day, bh.end_time)
+
+        if day_end <= day_start:
+            return render_template(
+                "book_slots.html",
+                selected_date=selected_date,
+                slots=[],
+                error="Business hours are not configured correctly for this day."
+            )
+
+    # Already booked start times in this window
     booked = Appointment.query.filter(
         Appointment.start_at >= day_start,
         Appointment.start_at < day_end,
@@ -302,12 +339,64 @@ def book():
             slots.append(cur)
         cur += timedelta(minutes=SLOT_STEP_MINUTES)
 
-    return render_template(
-        "book_slots.html",
-        selected_date=selected_date,
-        slots=slots,
-        error=error
-    )
+    return render_template("book_slots.html", selected_date=selected_date, slots=slots, error=error)
+
+
+@app.route("/business/overrides", methods=["GET", "POST"])
+@require_role("business")
+def business_overrides():
+    error = None
+
+    def parse_time_or_none(value: str):
+        if not value or ":" not in value:
+            return None
+        h, m = value.split(":")
+        return time(int(h), int(m))
+
+    if request.method == "POST":
+        date_str = request.form.get("date", "").strip()
+        closed = request.form.get("is_closed") == "on"
+        start_str = request.form.get("start_time", "").strip()
+        end_str = request.form.get("end_time", "").strip()
+
+        # Validate date
+        try:
+            override_date = datetime.fromisoformat(date_str).date()
+        except ValueError:
+            error = "Please select a valid date."
+            overrides = AvailabilityOverride.query.order_by(AvailabilityOverride.date.asc()).all()
+            return render_template("business_overrides.html", overrides=overrides, error=error)
+
+        row = AvailabilityOverride.query.filter_by(date=override_date).first()
+        if not row:
+            row = AvailabilityOverride(date=override_date)
+            db.session.add(row)
+
+        if closed:
+            row.is_closed = True
+            row.start_time = None
+            row.end_time = None
+        else:
+            st = parse_time_or_none(start_str)
+            et = parse_time_or_none(end_str)
+
+            if st is None or et is None:
+                error = "Start and end times are required unless the day is closed."
+            elif et <= st:
+                error = "End time must be after start time."
+            else:
+                row.is_closed = False
+                row.start_time = st
+                row.end_time = et
+
+        if error:
+            db.session.rollback()
+        else:
+            db.session.commit()
+            return redirect(url_for("business_overrides"))
+
+    overrides = AvailabilityOverride.query.order_by(AvailabilityOverride.date.asc()).all()
+    return render_template("business_overrides.html", overrides=overrides, error=error)
 
 
 # ---- User Area ----
@@ -322,6 +411,17 @@ def user_home():
 @require_role("business")
 def business_dashboard():
     return render_template("business_dashboard.html")
+
+
+class AvailabilityOverride(db.Model):
+    __tablename__ = "availability_overrides"
+
+    id = db.Column(db.Integer, primary_key=True)
+    date = db.Column(db.Date, unique=True, nullable=False)  # one override per date
+    start_time = db.Column(db.Time, nullable=True)          # null if closed
+    end_time = db.Column(db.Time, nullable=True)            # null if closed
+    is_closed = db.Column(db.Boolean, nullable=False, default=False)
+
 
 
 # ---- Admin Area ----
