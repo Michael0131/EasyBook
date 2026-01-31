@@ -104,8 +104,6 @@ def login():
 
     return render_template("login.html", error=error)
 
-
-
 # Debug, can be deleted whenever - MUST BE DELETED BEFORE PRODUCTION
 @app.route("/whoami")
 def whoami():
