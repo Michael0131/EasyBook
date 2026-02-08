@@ -2,9 +2,9 @@ from functools import wraps
 from flask import Flask, render_template, request, redirect, url_for, session
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
-from werkzeug.security import generate_password_hash
-from werkzeug.security import check_password_hash
+from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import time, datetime, timedelta
+from sqlalchemy.exc import IntegrityError
 
 import os
 
@@ -19,6 +19,8 @@ os.makedirs(app.instance_path, exist_ok=True)
 app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv("DATABASE_URL", "sqlite:///easybook.db")
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
+
+# DB URL: $env:DATABASE_URL="postgresql://postgres.qxhypuaexmerbhqrgkgg:EasyBookMj296765@aws-1-us-east-2.pooler.supabase.com:5432/postgres"
 
 db = SQLAlchemy(app)
 migrate = Migrate(app, db)
@@ -124,31 +126,36 @@ def register():
     if request.method == "POST":
         email = request.form.get("email", "").strip().lower()
         password = request.form.get("password", "")
+        role = request.form.get("role", "user")  # or force "user" if you want
 
+        # Basic validation
         if not email or not password:
             error = "Email and password are required."
             return render_template("register.html", error=error)
 
-        existing = Account.query.filter_by(email=email).first()
-        if existing:
-            error = "That email is already registered."
-            return render_template("register.html", error=error)
+        # Optional: prevent creating admin/business accounts from public register page
+        if role not in ("user",):
+            role = "user"
 
-        user = Account(
-            email=email,
-            password_hash=generate_password_hash(password),
-            role="user",
-            is_active=True
-        )
-        db.session.add(user)
-        db.session.commit()
+        try:
+            account = Account(
+                email=email,
+                password_hash=generate_password_hash(password),
+                role=role,
+                is_active=True
+            )
+            db.session.add(account)
+            db.session.commit()
 
-        # Log the new user in immediately
-        session.clear()
-        session["role"] = "user"
-        session["account_id"] = user.id
+            # auto-login after register (optional)
+            session.clear()
+            session["account_id"] = account.id
+            session["role"] = account.role
+            return redirect(url_for("user_home"))
 
-        return redirect(url_for("user_home"))
+        except IntegrityError:
+            db.session.rollback()
+            error = "That email is already registered. Please log in instead."
 
     return render_template("register.html", error=error)
 
@@ -462,7 +469,7 @@ def seed():
 
     return "Seeded admin and business."
 
-print("DB:", app.config["SQLALCHEMY_DATABASE_URI"])
+
 
 if __name__ == "__main__":
     app.run(debug=True)
