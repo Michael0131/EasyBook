@@ -37,7 +37,7 @@ https://easybook-66x7.onrender.com/login
 
 **Database**
 - SQLite (development)  
-- PostgreSQL (production)
+- Supabase (production)
 
 ---
 
