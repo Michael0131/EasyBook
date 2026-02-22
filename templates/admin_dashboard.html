@@ -1,15 +1,101 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Admin - EasyBook</title>
+  <title>Admin Dashboard - EasyBook</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
 </head>
 <body class="bg-light">
   <div class="container py-5">
-    <h1>Admin Dashboard</h1>
-    <p>Admin-only area.</p>
 
-    <a class="btn btn-danger" href="/logout">Logout</a>
+    <div class="d-flex justify-content-between align-items-center">
+      <div>
+        <h1 class="mb-0">Admin Dashboard</h1>
+        {% if me %}
+          <div class="text-muted small mt-1">
+            Logged in as: <strong>{{ me.first_name }} {{ me.last_name }}</strong> (ID: {{ me.id }})
+          </div>
+        {% endif %}
+      </div>
+      <a class="btn btn-danger" href="/logout">Logout</a>
+    </div>
+
+    <div class="mt-4 row g-3">
+      <div class="col-md-6">
+        <div class="card shadow-sm">
+          <div class="card-body">
+            <h5 class="card-title">Accounts</h5>
+            <p class="mb-1">Total accounts: <strong>{{ total_accounts }}</strong></p>
+            <p class="mb-0">Active accounts: <strong>{{ active_accounts }}</strong></p>
+            <a class="btn btn-primary mt-3" href="/admin/accounts">Manage Accounts</a>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-md-6">
+        <div class="card shadow-sm">
+          <div class="card-body">
+            <h5 class="card-title">Appointments</h5>
+            <p class="mb-0">Quick view of latest appointments</p>
+            <a class="btn btn-primary mt-3" href="/admin/appointments">Manage Appointments</a>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <hr class="my-4">
+
+    <h4>Recent Appointments</h4>
+    <div class="table-responsive">
+      <table class="table table-striped table-bordered bg-white">
+        <thead>
+          <tr>
+            <th style="width: 90px;">ID</th>
+            <th>User</th>
+            <th>Email</th>
+            <th style="width: 230px;">Date/Time</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for a in appointments %}
+          <tr>
+            <td>{{ a.id }}</td>
+
+            <td>
+              {% if a.user %}
+                {{ a.user.first_name }} {{ a.user.last_name }}
+                <div class="text-muted small">User ID: {{ a.user.id }}</div>
+              {% else %}
+                <span class="text-muted">—</span>
+              {% endif %}
+            </td>
+
+            <td>
+              {% if a.user %}
+                {{ a.user.email }}
+              {% else %}
+                <span class="text-muted">—</span>
+              {% endif %}
+            </td>
+
+            <td>
+              {% if a.start_at %}
+                <div><strong>{{ a.start_at.strftime("%Y-%m-%d") }}</strong></div>
+                <div class="text-muted">
+                  {{ a.start_at.strftime("%I:%M %p") }}
+                  {% if a.end_at %}– {{ a.end_at.strftime("%I:%M %p") }}{% endif %}
+                </div>
+              {% else %}
+                <span class="text-muted">—</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="4">No appointments yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
   </div>
 </body>
 </html>

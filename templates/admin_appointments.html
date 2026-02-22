@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Admin Appointments - EasyBook</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body class="bg-light">
+  <div class="container py-5">
+
+    <div class="d-flex justify-content-between align-items-center">
+      <h1 class="mb-0">Manage Appointments</h1>
+      <div>
+        <a class="btn btn-secondary" href="/admin">Back</a>
+        <a class="btn btn-danger" href="/logout">Logout</a>
+      </div>
+    </div>
+
+    <form class="row g-2 mt-3" method="GET">
+      <div class="col-md-8">
+        <input class="form-control" name="q" placeholder="Search by name or email..." value="{{ q }}">
+      </div>
+      <div class="col-md-4">
+        <button class="btn btn-primary w-100">Search</button>
+      </div>
+    </form>
+
+    <hr class="my-4">
+
+    <div class="table-responsive">
+      <table class="table table-striped table-bordered bg-white">
+        <thead>
+          <tr>
+            <th style="width: 90px;">ID</th>
+            <th>User</th>
+            <th>Email</th>
+            <th style="width: 230px;">Date/Time</th>
+            <th style="width: 160px;">Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for a in appointments %}
+          <tr>
+            <td>{{ a.id }}</td>
+
+            <td>
+              {% if a.user %}
+                {{ a.user.first_name }} {{ a.user.last_name }}
+                <div class="text-muted small">User ID: {{ a.user.id }}</div>
+              {% else %}
+                <span class="text-muted">—</span>
+              {% endif %}
+            </td>
+
+            <td>
+              {% if a.user %}
+                {{ a.user.email }}
+              {% else %}
+                <span class="text-muted">—</span>
+              {% endif %}
+            </td>
+
+            <td>
+              {% if a.start_at %}
+                <div><strong>{{ a.start_at.strftime("%Y-%m-%d") }}</strong></div>
+                <div class="text-muted">
+                  {{ a.start_at.strftime("%I:%M %p") }}
+                  {% if a.end_at %}– {{ a.end_at.strftime("%I:%M %p") }}{% endif %}
+                </div>
+              {% else %}
+                <span class="text-muted">—</span>
+              {% endif %}
+            </td>
+
+            <td>
+              <form method="POST" action="/admin/appointments/{{ a.id }}/cancel"
+                    onsubmit="return confirm('Cancel this appointment?');">
+                <button class="btn btn-danger btn-sm">Cancel</button>
+              </form>
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="5">No appointments found.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+  </div>
+</body>
+</html>
