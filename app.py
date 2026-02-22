@@ -139,7 +139,15 @@ def login():
 
     return render_template("login.html", error=error)
 
+# Debug, can be deleted whenever - MUST BE DELETED BEFORE PRODUCTION
+@app.route("/whoami")
+def whoami():
+    return {
+        "role": session.get("role"),
+        "account_id": session.get("account_id")
+    }
 
+# --- REGISTER ----- 
 @app.route("/register", methods=["GET", "POST"])
 def register():
     error = None
