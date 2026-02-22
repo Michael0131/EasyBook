@@ -8,6 +8,7 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
 from sqlalchemy import or_
 from werkzeug.security import generate_password_hash, check_password_hash
+from sqlalchemy.orm import joinedload
 
 load_dotenv()
 
@@ -384,6 +385,14 @@ def business_overrides():
     overrides = AvailabilityOverride.query.order_by(AvailabilityOverride.date.asc()).all()
     return render_template("business_overrides.html", overrides=overrides, error=error)
 
+@app.route("/business/overrides/<int:override_id>/delete", methods=["POST"])
+@require_role("business")
+def delete_override(override_id):
+    row = AvailabilityOverride.query.get_or_404(override_id)
+    db.session.delete(row)
+    db.session.commit()
+    return redirect(url_for("business_overrides"))
+
 # -----------------------------
 # Admin Area
 # -----------------------------
@@ -397,7 +406,14 @@ def admin_dashboard():
     if session.get("account_id"):
         me = Account.query.get(session["account_id"])
 
-    appointments = Appointment.query.order_by(Appointment.id.desc()).limit(20).all()
+    # IMPORTANT: load the linked Account so name/email shows in templates
+    appointments = (
+        Appointment.query
+        .options(joinedload(Appointment.user))
+        .order_by(Appointment.start_at.desc())
+        .limit(20)
+        .all()
+    )
 
     return render_template(
         "admin_dashboard.html",
@@ -406,7 +422,6 @@ def admin_dashboard():
         appointments=appointments,
         me=me,
     )
-
 
 @app.route("/admin/accounts")
 @require_role("admin")
@@ -461,10 +476,11 @@ def admin_update_role(account_id):
 def admin_appointments():
     q = request.args.get("q", "").strip().lower()
 
-    query = Appointment.query.join(Account, Account.id == Appointment.user_id, isouter=True)
+    query = Appointment.query.options(joinedload(Appointment.user))
 
     if q:
-        query = query.filter(
+        # Search by linked account fields
+        query = query.join(Account, Account.id == Appointment.user_id).filter(
             or_(
                 Account.email.ilike(f"%{q}%"),
                 Account.first_name.ilike(f"%{q}%"),
@@ -472,7 +488,7 @@ def admin_appointments():
             )
         )
 
-    appointments = query.order_by(Appointment.id.desc()).all()
+    appointments = query.order_by(Appointment.start_at.desc()).all()
     return render_template("admin_appointments.html", appointments=appointments, q=q)
 
 

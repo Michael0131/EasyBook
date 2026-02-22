@@ -5,21 +5,25 @@
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
 </head>
 <body class="bg-light">
-  <div class="container py-5" style="max-width: 900px;">
-    <div class="d-flex justify-content-between align-items-center mb-3">
-      <h1 class="m-0">Date Overrides</h1>
-      <a class="btn btn-danger" href="/logout">Logout</a>
+  <div class="container py-5">
+
+    <div class="d-flex justify-content-between align-items-center">
+      <h1 class="mb-0">Date Overrides</h1>
+      <div>
+        <a class="btn btn-secondary" href="/business">Back</a>
+        <a class="btn btn-danger" href="/logout">Logout</a>
+      </div>
     </div>
 
     {% if error %}
-      <div class="alert alert-danger">{{ error }}</div>
+      <div class="alert alert-danger mt-3">{{ error }}</div>
     {% endif %}
 
-    <div class="card shadow-sm mb-4">
+    <div class="card mt-4 shadow-sm">
       <div class="card-body">
         <h5 class="card-title">Add / Update Override</h5>
 
-        <form method="POST" class="row g-3">
+        <form class="row g-2 mt-2" method="POST">
           <div class="col-md-3">
             <label class="form-label">Date</label>
             <input class="form-control" type="date" name="date" required>
@@ -38,66 +42,65 @@
           <div class="col-md-3 d-flex align-items-end">
             <div class="form-check">
               <input class="form-check-input" type="checkbox" name="is_closed" id="is_closed">
-              <label class="form-check-label" for="is_closed">
-                Closed all day
-              </label>
+              <label class="form-check-label" for="is_closed">Closed</label>
             </div>
           </div>
 
           <div class="col-12">
             <button class="btn btn-primary">Save Override</button>
-            <a class="btn btn-secondary ms-2" href="/business">Back</a>
           </div>
         </form>
-
-        <p class="text-muted mt-3 mb-0">
-          Note: Overrides take priority over weekly business hours for that date.
-        </p>
       </div>
     </div>
 
-    <div class="card shadow-sm">
-      <div class="card-body">
-        <h5 class="card-title">Existing Overrides</h5>
+    <hr class="my-4">
 
-        {% if overrides|length == 0 %}
-          <p class="text-muted mb-0">No overrides set yet.</p>
-        {% else %}
-          <div class="table-responsive">
-            <table class="table align-middle">
-              <thead>
-                <tr>
-                  <th>Date</th>
-                  <th>Status</th>
-                  <th>Hours</th>
-                </tr>
-              </thead>
-              <tbody>
-                {% for o in overrides %}
-                <tr>
-                  <td><strong>{{ o.date.isoformat() }}</strong></td>
-                  <td>
-                    {% if o.is_closed %}
-                      <span class="badge text-bg-danger">Closed</span>
-                    {% else %}
-                      <span class="badge text-bg-success">Open</span>
-                    {% endif %}
-                  </td>
-                  <td>
-                    {% if o.is_closed %}
-                      —
-                    {% else %}
-                      {{ o.start_time.strftime("%I:%M %p") }} – {{ o.end_time.strftime("%I:%M %p") }}
-                    {% endif %}
-                  </td>
-                </tr>
-                {% endfor %}
-              </tbody>
-            </table>
-          </div>
-        {% endif %}
-      </div>
+    <h4>Current Overrides</h4>
+    <div class="table-responsive">
+      <table class="table table-striped table-bordered bg-white">
+        <thead>
+          <tr>
+            <th style="width: 150px;">Date</th>
+            <th>Status</th>
+            <th style="width: 220px;">Hours</th>
+            <th style="width: 160px;">Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for o in overrides %}
+          <tr>
+            <td><strong>{{ o.date }}</strong></td>
+
+            <td>
+              {% if o.is_closed %}
+                <span class="badge bg-danger">Closed</span>
+              {% else %}
+                <span class="badge bg-success">Open</span>
+              {% endif %}
+            </td>
+
+            <td>
+              {% if o.is_closed %}
+                <span class="text-muted">—</span>
+              {% else %}
+                {{ o.start_time }} – {{ o.end_time }}
+              {% endif %}
+            </td>
+
+            <td>
+              <form method="POST" action="/business/overrides/{{ o.id }}/delete"
+                    onsubmit="return confirm('Remove override for {{ o.date }}?');">
+                <button class="btn btn-outline-danger btn-sm">Remove Override</button>
+              </form>
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="4">No overrides yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
     </div>
+
   </div>
 </body>
 </html>

@@ -17,7 +17,7 @@
 
     <form class="row g-2 mt-3" method="GET">
       <div class="col-md-8">
-        <input class="form-control" name="q" placeholder="Search by user name or email..." value="{{ q }}">
+        <input class="form-control" name="q" placeholder="Search by name or email..." value="{{ q }}">
       </div>
       <div class="col-md-4">
         <button class="btn btn-primary w-100">Search</button>
@@ -27,11 +27,13 @@
     <hr class="my-4">
 
     <div class="table-responsive">
-      <table class="table table-striped table-bordered bg-white align-middle">
+      <table class="table table-striped table-bordered bg-white">
         <thead>
           <tr>
             <th style="width: 90px;">ID</th>
-            <th>Appointment</th>
+            <th>User</th>
+            <th>Email</th>
+            <th style="width: 230px;">Date/Time</th>
             <th style="width: 160px;">Action</th>
           </tr>
         </thead>
@@ -39,39 +41,45 @@
           {% for a in appointments %}
           <tr>
             <td>{{ a.id }}</td>
+
             <td>
-              <!-- User -->
-              {% if a.account is defined and a.account %}
-                <div><strong>Name:</strong> {{ a.account.first_name }} {{ a.account.last_name }}</div>
-                <div><strong>User ID:</strong> {{ a.account.id }}</div>
-                <div><strong>Email:</strong> {{ a.account.email }}</div>
+              {% if a.user %}
+                {{ a.user.first_name }} {{ a.user.last_name }}
+                <div class="text-muted small">User ID: {{ a.user.id }}</div>
               {% else %}
-                {% if a.user_id is defined %}
-                  <div><strong>User ID:</strong> {{ a.user_id }}</div>
-                {% endif %}
-                {% if a.email is defined %}
-                  <div><strong>Email:</strong> {{ a.email }}</div>
-                {% endif %}
-              {% endif %}
-
-              <!-- Date/Time -->
-              {% if a.date is defined %}
-                <div><strong>Date:</strong> {{ a.date }}</div>
-              {% endif %}
-
-              {% if a.start_time is defined %}
-                <div><strong>Time:</strong> {{ a.start_time }}{% if a.end_time is defined %} – {{ a.end_time }}{% endif %}</div>
+                <span class="text-muted">—</span>
               {% endif %}
             </td>
 
             <td>
-              <form method="POST" action="/admin/appointments/{{ a.id }}/cancel" onsubmit="return confirm('Cancel this appointment?');">
+              {% if a.user %}
+                {{ a.user.email }}
+              {% else %}
+                <span class="text-muted">—</span>
+              {% endif %}
+            </td>
+
+            <td>
+              {% if a.start_at %}
+                <div><strong>{{ a.start_at.strftime("%Y-%m-%d") }}</strong></div>
+                <div class="text-muted">
+                  {{ a.start_at.strftime("%I:%M %p") }}
+                  {% if a.end_at %}– {{ a.end_at.strftime("%I:%M %p") }}{% endif %}
+                </div>
+              {% else %}
+                <span class="text-muted">—</span>
+              {% endif %}
+            </td>
+
+            <td>
+              <form method="POST" action="/admin/appointments/{{ a.id }}/cancel"
+                    onsubmit="return confirm('Cancel this appointment?');">
                 <button class="btn btn-danger btn-sm">Cancel</button>
               </form>
             </td>
           </tr>
           {% else %}
-          <tr><td colspan="3">No appointments found.</td></tr>
+          <tr><td colspan="5">No appointments found.</td></tr>
           {% endfor %}
         </tbody>
       </table>
