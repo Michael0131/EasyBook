@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Admin Accounts - EasyBook</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body class="bg-light">
+  <div class="container py-5">
+
+    <div class="d-flex justify-content-between align-items-center">
+      <h1 class="mb-0">Manage Accounts</h1>
+      <div>
+        <a class="btn btn-secondary" href="/admin">Back</a>
+        <a class="btn btn-danger" href="/logout">Logout</a>
+      </div>
+    </div>
+
+    <form class="row g-2 mt-3" method="GET">
+      <div class="col-md-8">
+        <input class="form-control" name="q" placeholder="Search by name, email, or role..." value="{{ q }}">
+      </div>
+      <div class="col-md-4">
+        <button class="btn btn-primary w-100">Search</button>
+      </div>
+    </form>
+
+    <hr class="my-4">
+
+    <div class="table-responsive">
+      <table class="table table-striped table-bordered bg-white align-middle">
+        <thead>
+          <tr>
+            <th style="width: 80px;">ID</th>
+            <th>Email</th>
+            <th style="width: 200px;">Name</th>
+            <th style="width: 140px;">Phone</th>
+            <th style="width: 120px;">Role</th>
+            <th style="width: 110px;">Active</th>
+            <th style="width: 360px;">Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for a in accounts %}
+          <tr>
+            <td>{{ a.id }}</td>
+            <td>{{ a.email }}</td>
+
+            <td>
+              {% if a.first_name and a.last_name %}
+                {{ a.first_name }} {{ a.last_name }}
+              {% else %}
+                <span class="text-muted">—</span>
+              {% endif %}
+            </td>
+
+            <td>
+              {% if a.phone %}
+                {{ a.phone }}
+              {% else %}
+                <span class="text-muted">—</span>
+              {% endif %}
+            </td>
+
+            <td>
+              <span class="badge bg-dark text-uppercase">{{ a.role }}</span>
+            </td>
+
+            <td>
+              {% if a.is_active %}
+                <span class="badge bg-success">Active</span>
+              {% else %}
+                <span class="badge bg-secondary">Disabled</span>
+              {% endif %}
+            </td>
+
+            <td class="d-flex gap-2 flex-wrap">
+
+              <!-- Enable/Disable -->
+              <form method="POST" action="/admin/accounts/{{ a.id }}/toggle" class="d-inline">
+                {% if a.is_active %}
+                  <button class="btn btn-warning btn-sm">Disable</button>
+                {% else %}
+                  <button class="btn btn-success btn-sm">Enable</button>
+                {% endif %}
+              </form>
+
+              <!-- Promote/Demote -->
+              <form method="POST" action="/admin/accounts/{{ a.id }}/role" class="d-inline">
+                <div class="input-group input-group-sm">
+                  <select class="form-select" name="role" aria-label="Role">
+                    <option value="user" {% if a.role=="user" %}selected{% endif %}>user</option>
+                    <option value="business" {% if a.role=="business" %}selected{% endif %}>business</option>
+                    <option value="admin" {% if a.role=="admin" %}selected{% endif %}>admin</option>
+                  </select>
+                  <button class="btn btn-primary">Update Role</button>
+                </div>
+              </form>
+
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="7">No accounts found.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+  </div>
+</body>
+</html>
