@@ -190,11 +190,6 @@ def logout():
 # -----------------------------
 # User Area
 # -----------------------------
-@app.route("/user")
-@require_role("user")
-def user_home():
-    return render_template("user_home.html")
-
 
 @app.route("/book", methods=["GET", "POST"])
 @require_role("user")
@@ -208,7 +203,6 @@ def book():
     today = datetime.now().date()
     now_dt = datetime.now()
 
-    # Search window for selectable dates
     WINDOW_DAYS = 60
     range_start = today
     range_end = today + timedelta(days=WINDOW_DAYS)
@@ -223,8 +217,10 @@ def book():
     # Overrides for date range
     overrides = (
         AvailabilityOverride.query
-        .filter(AvailabilityOverride.date >= range_start,
-                AvailabilityOverride.date <= range_end)
+        .filter(
+            AvailabilityOverride.date >= range_start,
+            AvailabilityOverride.date <= range_end,
+        )
         .all()
     )
     ov_by_date = {ov.date: ov for ov in overrides}
@@ -235,9 +231,11 @@ def book():
 
     appts = (
         Appointment.query
-        .filter(Appointment.status == "scheduled",
-                Appointment.start_at >= appt_start_dt,
-                Appointment.start_at < appt_end_dt)
+        .filter(
+            Appointment.status == "scheduled",
+            Appointment.start_at >= appt_start_dt,
+            Appointment.start_at < appt_end_dt,
+        )
         .all()
     )
 
@@ -247,7 +245,27 @@ def book():
         booked_starts_by_date.setdefault(d, set()).add(a.start_at)
 
     # -----------------------------
-    # Helper: get open hours for a day
+    # Helper: determine if business is open that day
+    # -----------------------------
+    def is_open_day(day_date):
+        ov = ov_by_date.get(day_date)
+        if ov:
+            # override exists
+            if ov.is_closed:
+                return False
+            if not ov.start_time or not ov.end_time or ov.end_time <= ov.start_time:
+                return False
+            return True
+
+        bh = bh_by_weekday.get(day_date.weekday())
+        if not bh or bh.is_closed:
+            return False
+        if bh.end_time <= bh.start_time:
+            return False
+        return True
+
+    # -----------------------------
+    # Helper: get open hours for a day (or None)
     # -----------------------------
     def get_day_hours(day_date):
         ov = ov_by_date.get(day_date)
@@ -305,6 +323,7 @@ def book():
                 error="Invalid time selected.",
                 today=today.isoformat(),
                 available_dates=[],
+                open_dates=[],
             )
 
         # Server-side safety: block past bookings
@@ -329,17 +348,30 @@ def book():
                 return render_template("booking_success.html", start_at=start_at)
 
     # -----------------------------
-    # Build available_dates (NO DB)
+    # Build open_dates and available_dates (NO DB)
+    # open_dates: business open (even if fully booked)
+    # available_dates: open + has at least 1 slot
     # -----------------------------
+    open_dates = []
     available_dates = []
+
     for i in range(0, WINDOW_DAYS + 1):
         d = today + timedelta(days=i)
-        if build_slots_for_day(d):
-            available_dates.append(d.isoformat())
+
+        if is_open_day(d):
+            open_dates.append(d.isoformat())
+
+            if build_slots_for_day(d):
+                available_dates.append(d.isoformat())
+
+    # earliest bookable date (open + has slots)
+    soonest_available = available_dates[0] if available_dates else None
 
     # -----------------------------
     # Determine selected day
     # -----------------------------
+    redirected_message = None
+
     if selected_date:
         try:
             day = datetime.fromisoformat(selected_date).date()
@@ -347,24 +379,37 @@ def book():
             day = today
             selected_date = day.isoformat()
 
+        # No past dates
         if day < today:
             day = today
             selected_date = day.isoformat()
+
+        # If business is closed that day, bounce to soonest available with message
+        if soonest_available and selected_date not in open_dates:
+            redirected_message = "This business is not open this day. You have returned to the soonest appointment."
+            selected_date = soonest_available
+            day = datetime.fromisoformat(selected_date).date()
+
+        # If business is open but fully booked, also bounce to soonest available with message
+        elif soonest_available and selected_date in open_dates and selected_date not in available_dates:
+            redirected_message = "No appointments available for this day. You have returned to the soonest appointment."
+            selected_date = soonest_available
+            day = datetime.fromisoformat(selected_date).date()
+
     else:
         # Default to closest day that has availability
-        if available_dates:
-            selected_date = available_dates[0]
+        if soonest_available:
+            selected_date = soonest_available
             day = datetime.fromisoformat(selected_date).date()
         else:
             day = today
             selected_date = day.isoformat()
 
-    # If selected date has no availability, force to first available date
-    if available_dates and selected_date not in available_dates:
-        selected_date = available_dates[0]
-        day = datetime.fromisoformat(selected_date).date()
-
     slots = build_slots_for_day(day)
+
+    # Use error slot for the bounce message (so it displays without template changes)
+    if redirected_message and not error:
+        error = redirected_message
 
     return render_template(
         "book_slots.html",
@@ -372,7 +417,10 @@ def book():
         slots=slots,
         error=error,
         today=today.isoformat(),
+        # available_dates: open + has slots (for booking)
         available_dates=available_dates,
+        # open_dates: open days (for calendar greying-out closed days)
+        open_dates=open_dates,
     )
 
 # -----------------------------
