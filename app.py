@@ -133,7 +133,7 @@ def login():
                 return redirect(url_for("admin_dashboard"))
             if account.role == "business":
                 return redirect(url_for("business_dashboard"))
-            return redirect(url_for("user_home"))
+            return redirect(url_for("book"))  # user goes straight to booking page
 
         error = "Invalid email or password."
 
@@ -205,7 +205,91 @@ def book():
     APPT_MINUTES = 30
     SLOT_STEP_MINUTES = 30
 
+    today = datetime.now().date()
+    now_dt = datetime.now()
+
+    # Search window for selectable dates
+    WINDOW_DAYS = 60
+    range_start = today
+    range_end = today + timedelta(days=WINDOW_DAYS)
+
+    # -----------------------------
+    # Preload data (FAST)
+    # -----------------------------
+    # Business hours: 7 rows max
+    bh_rows = BusinessHour.query.all()
+    bh_by_weekday = {bh.weekday: bh for bh in bh_rows}
+
+    # Overrides for date range
+    overrides = (
+        AvailabilityOverride.query
+        .filter(AvailabilityOverride.date >= range_start,
+                AvailabilityOverride.date <= range_end)
+        .all()
+    )
+    ov_by_date = {ov.date: ov for ov in overrides}
+
+    # Appointments for datetime range (include end day)
+    appt_start_dt = datetime.combine(range_start, time(0, 0))
+    appt_end_dt = datetime.combine(range_end + timedelta(days=1), time(0, 0))
+
+    appts = (
+        Appointment.query
+        .filter(Appointment.status == "scheduled",
+                Appointment.start_at >= appt_start_dt,
+                Appointment.start_at < appt_end_dt)
+        .all()
+    )
+
+    booked_starts_by_date = {}
+    for a in appts:
+        d = a.start_at.date()
+        booked_starts_by_date.setdefault(d, set()).add(a.start_at)
+
+    # -----------------------------
+    # Helper: get open hours for a day
+    # -----------------------------
+    def get_day_hours(day_date):
+        ov = ov_by_date.get(day_date)
+        if ov:
+            if ov.is_closed:
+                return None
+            if not ov.start_time or not ov.end_time or ov.end_time <= ov.start_time:
+                return None
+            return (ov.start_time, ov.end_time)
+
+        bh = bh_by_weekday.get(day_date.weekday())
+        if not bh or bh.is_closed or bh.end_time <= bh.start_time:
+            return None
+        return (bh.start_time, bh.end_time)
+
+    # -----------------------------
+    # Helper: build slots for a day (NO DB)
+    # -----------------------------
+    def build_slots_for_day(day_date):
+        hours = get_day_hours(day_date)
+        if not hours:
+            return []
+
+        start_t, end_t = hours
+        day_start = datetime.combine(day_date, start_t)
+        day_end = datetime.combine(day_date, end_t)
+
+        booked_starts = booked_starts_by_date.get(day_date, set())
+
+        slots_local = []
+        cur = day_start
+        while cur + timedelta(minutes=APPT_MINUTES) <= day_end:
+            # Hide past times (esp. today)
+            if cur >= now_dt and cur not in booked_starts:
+                slots_local.append(cur)
+            cur += timedelta(minutes=SLOT_STEP_MINUTES)
+
+        return slots_local
+
+    # -----------------------------
     # POST: book slot
+    # -----------------------------
     if request.method == "POST":
         start_str = request.form.get("start_at", "")
         if not start_str:
@@ -214,74 +298,82 @@ def book():
         try:
             start_at = datetime.fromisoformat(start_str)
         except ValueError:
-            return render_template("book_slots.html", selected_date=selected_date, slots=[], error="Invalid time selected.")
-
-        end_at = start_at + timedelta(minutes=APPT_MINUTES)
-
-        existing = Appointment.query.filter_by(start_at=start_at, status="scheduled").first()
-        if existing:
-            error = "Sorry, that slot was just booked. Please choose another."
-        else:
-            appt = Appointment(
-                user_id=session.get("account_id"),
-                start_at=start_at,
-                end_at=end_at,
-                status="scheduled",
+            return render_template(
+                "book_slots.html",
+                selected_date=(selected_date or today.isoformat()),
+                slots=[],
+                error="Invalid time selected.",
+                today=today.isoformat(),
+                available_dates=[],
             )
-            db.session.add(appt)
-            db.session.commit()
-            return render_template("booking_success.html", start_at=start_at)
 
-    # GET: available slots
-    if not selected_date:
-        selected_date = datetime.now().date().isoformat()
+        # Server-side safety: block past bookings
+        if start_at < datetime.now():
+            error = "You cannot book an appointment in the past."
+        else:
+            end_at = start_at + timedelta(minutes=APPT_MINUTES)
 
-    try:
-        day = datetime.fromisoformat(selected_date).date()
-    except ValueError:
-        day = datetime.now().date()
-        selected_date = day.isoformat()
+            # Conflict check (DB) - single query
+            existing = Appointment.query.filter_by(start_at=start_at, status="scheduled").first()
+            if existing:
+                error = "Sorry, that slot was just booked. Please choose another."
+            else:
+                appt = Appointment(
+                    user_id=session.get("account_id"),
+                    start_at=start_at,
+                    end_at=end_at,
+                    status="scheduled",
+                )
+                db.session.add(appt)
+                db.session.commit()
+                return render_template("booking_success.html", start_at=start_at)
 
-    # Priority: date override
-    ov = AvailabilityOverride.query.filter_by(date=day).first()
-    if ov:
-        if ov.is_closed:
-            return render_template("book_slots.html", selected_date=selected_date, slots=[], error=None)
+    # -----------------------------
+    # Build available_dates (NO DB)
+    # -----------------------------
+    available_dates = []
+    for i in range(0, WINDOW_DAYS + 1):
+        d = today + timedelta(days=i)
+        if build_slots_for_day(d):
+            available_dates.append(d.isoformat())
 
-        if not ov.start_time or not ov.end_time or ov.end_time <= ov.start_time:
-            return render_template("book_slots.html", selected_date=selected_date, slots=[], error="Override hours invalid for this date.")
+    # -----------------------------
+    # Determine selected day
+    # -----------------------------
+    if selected_date:
+        try:
+            day = datetime.fromisoformat(selected_date).date()
+        except ValueError:
+            day = today
+            selected_date = day.isoformat()
 
-        day_start = datetime.combine(day, ov.start_time)
-        day_end = datetime.combine(day, ov.end_time)
+        if day < today:
+            day = today
+            selected_date = day.isoformat()
     else:
-        # Weekly schedule fallback
-        weekday = day.weekday()
-        bh = BusinessHour.query.filter_by(weekday=weekday).first()
+        # Default to closest day that has availability
+        if available_dates:
+            selected_date = available_dates[0]
+            day = datetime.fromisoformat(selected_date).date()
+        else:
+            day = today
+            selected_date = day.isoformat()
 
-        if not bh or bh.is_closed:
-            return render_template("book_slots.html", selected_date=selected_date, slots=[], error=None)
+    # If selected date has no availability, force to first available date
+    if available_dates and selected_date not in available_dates:
+        selected_date = available_dates[0]
+        day = datetime.fromisoformat(selected_date).date()
 
-        day_start = datetime.combine(day, bh.start_time)
-        day_end = datetime.combine(day, bh.end_time)
+    slots = build_slots_for_day(day)
 
-        if day_end <= day_start:
-            return render_template("book_slots.html", selected_date=selected_date, slots=[], error="Business hours invalid for this day.")
-
-    booked = Appointment.query.filter(
-        Appointment.start_at >= day_start,
-        Appointment.start_at < day_end,
-        Appointment.status == "scheduled",
-    ).all()
-    booked_starts = {a.start_at for a in booked}
-
-    slots = []
-    cur = day_start
-    while cur + timedelta(minutes=APPT_MINUTES) <= day_end:
-        if cur not in booked_starts:
-            slots.append(cur)
-        cur += timedelta(minutes=SLOT_STEP_MINUTES)
-
-    return render_template("book_slots.html", selected_date=selected_date, slots=slots, error=error)
+    return render_template(
+        "book_slots.html",
+        selected_date=selected_date,
+        slots=slots,
+        error=error,
+        today=today.isoformat(),
+        available_dates=available_dates,
+    )
 
 # -----------------------------
 # Business Area
