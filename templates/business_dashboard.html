@@ -1,16 +1,77 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Business - EasyBook</title>
+  <title>Business Dashboard - EasyBook</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
 </head>
 <body class="bg-light">
-  <div class="container py-5">
-    <h1>Business Dashboard</h1>
-    <p>Business-only area (hours, blocked times, approve requests will go here).</p>
-    <a class="btn btn-primary" href="/business/hours">Edit Business Hours</a>
-    <a class="btn btn-outline-primary" href="/business/overrides">Date Overrides</a>
-    <a class="btn btn-danger" href="/logout">Logout</a>
+  <div class="container py-5" style="max-width: 800px;">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <h1 class="m-0">Business Dashboard</h1>
+      <div class="d-flex gap-2">
+        <a class="btn btn-outline-primary" href="{{ url_for('business_overrides') }}">Date Overrides</a>
+        <a class="btn btn-danger" href="{{ url_for('logout') }}">Logout</a>
+      </div>
+    </div>
+
+    <form method="POST" class="card shadow-sm">
+      <div class="card-body">
+
+        <p class="text-muted mb-4">
+          Set your weekly operating hours. Check “Closed” for days you do not accept appointments.
+        </p>
+
+        <div class="table-responsive">
+          <table class="table align-middle">
+            <thead>
+              <tr>
+                <th>Day</th>
+                <th style="width: 160px;">Start</th>
+                <th style="width: 160px;">End</th>
+                <th style="width: 120px;">Closed</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for item in hours %}
+              <tr>
+                <td><strong>{{ item.name }}</strong></td>
+
+                <td>
+                  <input type="time"
+                         class="form-control"
+                         name="start_{{ item.weekday }}"
+                         value="{{ item.row.start_time.strftime('%H:%M') }}"
+                         {% if item.row.is_closed %}disabled{% endif %}>
+                </td>
+
+                <td>
+                  <input type="time"
+                         class="form-control"
+                         name="end_{{ item.weekday }}"
+                         value="{{ item.row.end_time.strftime('%H:%M') }}"
+                         {% if item.row.is_closed %}disabled{% endif %}>
+                </td>
+
+                <td class="text-center">
+                  <input class="form-check-input"
+                         type="checkbox"
+                         name="closed_{{ item.weekday }}"
+                         {% if item.row.is_closed %}checked{% endif %}>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+
+        <button class="btn btn-primary">Save Hours</button>
+
+      </div>
+    </form>
+
+    <div class="alert alert-info mt-3">
+      Note: Slot generation will use these hours next.
+    </div>
   </div>
 </body>
 </html>

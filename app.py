@@ -133,7 +133,7 @@ def login():
                 return redirect(url_for("admin_dashboard"))
             if account.role == "business":
                 return redirect(url_for("business_dashboard"))
-            return redirect(url_for("book"))  # user goes straight to booking page
+            return redirect(url_for("book"))
 
         error = "Invalid email or password."
 
@@ -177,7 +177,7 @@ def register():
         session.clear()
         session["account_id"] = new_account.id
         session["role"] = new_account.role
-        return redirect(url_for("user_home"))
+        return redirect(url_for("book"))
 
     return render_template("register.html", error=error)
 
@@ -190,6 +190,38 @@ def logout():
 # -----------------------------
 # User Area
 # -----------------------------
+
+@app.route("/my-appointments")
+@require_role("user")
+def my_appointments():
+    appointments = (
+        Appointment.query
+        .filter(
+            Appointment.user_id == session.get("account_id"),
+            Appointment.status == "scheduled",
+            Appointment.start_at >= datetime.now()
+        )
+        .order_by(Appointment.start_at.asc())
+        .all()
+    )
+
+    return render_template("my_appointments.html", appointments=appointments)
+
+
+@app.route("/appointments/<int:appointment_id>/cancel", methods=["POST"])
+@require_role("user")
+def cancel_appointment(appointment_id):
+    appt = Appointment.query.get_or_404(appointment_id)
+
+    # Prevent cancelling someone else's appointment
+    if appt.user_id != session.get("account_id"):
+        abort(403)
+
+    appt.status = "cancelled"
+    db.session.commit()
+
+    return redirect(url_for("my_appointments"))
+
 
 @app.route("/book", methods=["GET", "POST"])
 @require_role("user")
@@ -423,13 +455,65 @@ def book():
         open_dates=open_dates,
     )
 
-# -----------------------------
+
 # Business Area
 # -----------------------------
-@app.route("/business")
+@app.route("/business", methods=["GET", "POST"])
 @require_role("business")
 def business_dashboard():
-    return render_template("business_dashboard.html")
+    day_names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+
+    if request.method == "POST":
+        for i in range(7):
+            closed = request.form.get(f"closed_{i}") == "on"
+            start_str = request.form.get(f"start_{i}", "")
+            end_str = request.form.get(f"end_{i}", "")
+
+            row = BusinessHour.query.filter_by(weekday=i).first()
+            if not row:
+                row = BusinessHour(
+                    weekday=i,
+                    start_time=time(9, 0),
+                    end_time=time(17, 0),
+                    is_closed=False
+                )
+                db.session.add(row)
+
+            if closed:
+                row.is_closed = True
+            else:
+                row.is_closed = False
+                st = parse_time_or_none(start_str) or row.start_time or time(9, 0)
+                et = parse_time_or_none(end_str) or row.end_time or time(17, 0)
+                row.start_time = st
+                row.end_time = et
+
+        db.session.commit()
+        return redirect(url_for("business_dashboard"))
+
+    rows = {bh.weekday: bh for bh in BusinessHour.query.all()}
+    hours = []
+
+    for i in range(7):
+        bh = rows.get(i)
+        if not bh:
+            default_closed = i in (5, 6)
+            bh = BusinessHour(
+                weekday=i,
+                start_time=time(9, 0),
+                end_time=time(17, 0),
+                is_closed=default_closed
+            )
+            db.session.add(bh)
+            db.session.commit()
+
+        hours.append({
+            "weekday": i,
+            "name": day_names[i],
+            "row": bh
+        })
+
+    return render_template("business_dashboard.html", hours=hours)
 
 
 @app.route("/business/hours", methods=["GET", "POST"])
@@ -533,6 +617,55 @@ def delete_override(override_id):
     db.session.delete(row)
     db.session.commit()
     return redirect(url_for("business_overrides"))
+
+@app.route("/business/reports")
+@require_role("business")
+def business_reports():
+    today = datetime.now().date()
+    tomorrow = today + timedelta(days=1)
+    week_end = today + timedelta(days=7)
+
+    total_appointments = Appointment.query.filter_by(status="scheduled").count()
+
+    appointments_today = (
+        Appointment.query
+        .filter(
+            Appointment.status == "scheduled",
+            Appointment.start_at >= datetime.combine(today, time(0, 0)),
+            Appointment.start_at < datetime.combine(tomorrow, time(0, 0)),
+        )
+        .count()
+    )
+
+    appointments_this_week = (
+        Appointment.query
+        .filter(
+            Appointment.status == "scheduled",
+            Appointment.start_at >= datetime.combine(today, time(0, 0)),
+            Appointment.start_at < datetime.combine(week_end, time(0, 0)),
+        )
+        .count()
+    )
+
+    upcoming_appointments = (
+        Appointment.query
+        .options(joinedload(Appointment.user))
+        .filter(
+            Appointment.status == "scheduled",
+            Appointment.start_at >= datetime.now(),
+        )
+        .order_by(Appointment.start_at.asc())
+        .limit(10)
+        .all()
+    )
+
+    return render_template(
+        "business_reports.html",
+        total_appointments=total_appointments,
+        appointments_today=appointments_today,
+        appointments_this_week=appointments_this_week,
+        upcoming_appointments=upcoming_appointments,
+    )
 
 # -----------------------------
 # Admin Area
