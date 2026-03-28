@@ -133,19 +133,12 @@ def login():
                 return redirect(url_for("admin_dashboard"))
             if account.role == "business":
                 return redirect(url_for("business_dashboard"))
-            return redirect(url_for("user_home"))
+            return redirect(url_for("book"))
 
         error = "Invalid email or password."
 
     return render_template("login.html", error=error)
 
-# Debug, can be deleted whenever - MUST BE DELETED BEFORE PRODUCTION
-@app.route("/whoami")
-def whoami():
-    return {
-        "role": session.get("role"),
-        "account_id": session.get("account_id")
-    }
 
 # --- REGISTER ----- 
 @app.route("/register", methods=["GET", "POST"])
@@ -184,7 +177,7 @@ def register():
         session.clear()
         session["account_id"] = new_account.id
         session["role"] = new_account.role
-        return redirect(url_for("user_home"))
+        return redirect(url_for("book"))
 
     return render_template("register.html", error=error)
 
@@ -197,10 +190,37 @@ def logout():
 # -----------------------------
 # User Area
 # -----------------------------
-@app.route("/user")
+
+@app.route("/my-appointments")
 @require_role("user")
-def user_home():
-    return render_template("user_home.html")
+def my_appointments():
+    appointments = (
+        Appointment.query
+        .filter(
+            Appointment.user_id == session.get("account_id"),
+            Appointment.status == "scheduled",
+            Appointment.start_at >= datetime.now()
+        )
+        .order_by(Appointment.start_at.asc())
+        .all()
+    )
+
+    return render_template("my_appointments.html", appointments=appointments)
+
+
+@app.route("/appointments/<int:appointment_id>/cancel", methods=["POST"])
+@require_role("user")
+def cancel_appointment(appointment_id):
+    appt = Appointment.query.get_or_404(appointment_id)
+
+    # Prevent cancelling someone else's appointment
+    if appt.user_id != session.get("account_id"):
+        abort(403)
+
+    appt.status = "cancelled"
+    db.session.commit()
+
+    return redirect(url_for("my_appointments"))
 
 
 @app.route("/book", methods=["GET", "POST"])
@@ -212,7 +232,114 @@ def book():
     APPT_MINUTES = 30
     SLOT_STEP_MINUTES = 30
 
+    today = datetime.now().date()
+    now_dt = datetime.now()
+
+    WINDOW_DAYS = 60
+    range_start = today
+    range_end = today + timedelta(days=WINDOW_DAYS)
+
+    # -----------------------------
+    # Preload data (FAST)
+    # -----------------------------
+    # Business hours: 7 rows max
+    bh_rows = BusinessHour.query.all()
+    bh_by_weekday = {bh.weekday: bh for bh in bh_rows}
+
+    # Overrides for date range
+    overrides = (
+        AvailabilityOverride.query
+        .filter(
+            AvailabilityOverride.date >= range_start,
+            AvailabilityOverride.date <= range_end,
+        )
+        .all()
+    )
+    ov_by_date = {ov.date: ov for ov in overrides}
+
+    # Appointments for datetime range (include end day)
+    appt_start_dt = datetime.combine(range_start, time(0, 0))
+    appt_end_dt = datetime.combine(range_end + timedelta(days=1), time(0, 0))
+
+    appts = (
+        Appointment.query
+        .filter(
+            Appointment.status == "scheduled",
+            Appointment.start_at >= appt_start_dt,
+            Appointment.start_at < appt_end_dt,
+        )
+        .all()
+    )
+
+    booked_starts_by_date = {}
+    for a in appts:
+        d = a.start_at.date()
+        booked_starts_by_date.setdefault(d, set()).add(a.start_at)
+
+    # -----------------------------
+    # Helper: determine if business is open that day
+    # -----------------------------
+    def is_open_day(day_date):
+        ov = ov_by_date.get(day_date)
+        if ov:
+            # override exists
+            if ov.is_closed:
+                return False
+            if not ov.start_time or not ov.end_time or ov.end_time <= ov.start_time:
+                return False
+            return True
+
+        bh = bh_by_weekday.get(day_date.weekday())
+        if not bh or bh.is_closed:
+            return False
+        if bh.end_time <= bh.start_time:
+            return False
+        return True
+
+    # -----------------------------
+    # Helper: get open hours for a day (or None)
+    # -----------------------------
+    def get_day_hours(day_date):
+        ov = ov_by_date.get(day_date)
+        if ov:
+            if ov.is_closed:
+                return None
+            if not ov.start_time or not ov.end_time or ov.end_time <= ov.start_time:
+                return None
+            return (ov.start_time, ov.end_time)
+
+        bh = bh_by_weekday.get(day_date.weekday())
+        if not bh or bh.is_closed or bh.end_time <= bh.start_time:
+            return None
+        return (bh.start_time, bh.end_time)
+
+    # -----------------------------
+    # Helper: build slots for a day (NO DB)
+    # -----------------------------
+    def build_slots_for_day(day_date):
+        hours = get_day_hours(day_date)
+        if not hours:
+            return []
+
+        start_t, end_t = hours
+        day_start = datetime.combine(day_date, start_t)
+        day_end = datetime.combine(day_date, end_t)
+
+        booked_starts = booked_starts_by_date.get(day_date, set())
+
+        slots_local = []
+        cur = day_start
+        while cur + timedelta(minutes=APPT_MINUTES) <= day_end:
+            # Hide past times (esp. today)
+            if cur >= now_dt and cur not in booked_starts:
+                slots_local.append(cur)
+            cur += timedelta(minutes=SLOT_STEP_MINUTES)
+
+        return slots_local
+
+    # -----------------------------
     # POST: book slot
+    # -----------------------------
     if request.method == "POST":
         start_str = request.form.get("start_at", "")
         if not start_str:
@@ -221,87 +348,119 @@ def book():
         try:
             start_at = datetime.fromisoformat(start_str)
         except ValueError:
-            return render_template("book_slots.html", selected_date=selected_date, slots=[], error="Invalid time selected.")
-
-        end_at = start_at + timedelta(minutes=APPT_MINUTES)
-
-        existing = Appointment.query.filter_by(start_at=start_at, status="scheduled").first()
-        if existing:
-            error = "Sorry, that slot was just booked. Please choose another."
-        else:
-            appt = Appointment(
-                user_id=session.get("account_id"),
-                start_at=start_at,
-                end_at=end_at,
-                status="scheduled",
+            return render_template(
+                "book_slots.html",
+                selected_date=(selected_date or today.isoformat()),
+                slots=[],
+                error="Invalid time selected.",
+                today=today.isoformat(),
+                available_dates=[],
+                open_dates=[],
             )
-            db.session.add(appt)
-            db.session.commit()
-            return render_template("booking_success.html", start_at=start_at)
 
-    # GET: available slots
-    if not selected_date:
-        selected_date = datetime.now().date().isoformat()
+        # Server-side safety: block past bookings
+        if start_at < datetime.now():
+            error = "You cannot book an appointment in the past."
+        else:
+            end_at = start_at + timedelta(minutes=APPT_MINUTES)
 
-    try:
-        day = datetime.fromisoformat(selected_date).date()
-    except ValueError:
-        day = datetime.now().date()
-        selected_date = day.isoformat()
+            # Conflict check (DB) - single query
+            existing = Appointment.query.filter_by(start_at=start_at, status="scheduled").first()
+            if existing:
+                error = "Sorry, that slot was just booked. Please choose another."
+            else:
+                appt = Appointment(
+                    user_id=session.get("account_id"),
+                    start_at=start_at,
+                    end_at=end_at,
+                    status="scheduled",
+                )
+                db.session.add(appt)
+                db.session.commit()
+                return render_template("booking_success.html", start_at=start_at)
 
-    # Priority: date override
-    ov = AvailabilityOverride.query.filter_by(date=day).first()
-    if ov:
-        if ov.is_closed:
-            return render_template("book_slots.html", selected_date=selected_date, slots=[], error=None)
+    # -----------------------------
+    # Build open_dates and available_dates (NO DB)
+    # open_dates: business open (even if fully booked)
+    # available_dates: open + has at least 1 slot
+    # -----------------------------
+    open_dates = []
+    available_dates = []
 
-        if not ov.start_time or not ov.end_time or ov.end_time <= ov.start_time:
-            return render_template("book_slots.html", selected_date=selected_date, slots=[], error="Override hours invalid for this date.")
+    for i in range(0, WINDOW_DAYS + 1):
+        d = today + timedelta(days=i)
 
-        day_start = datetime.combine(day, ov.start_time)
-        day_end = datetime.combine(day, ov.end_time)
+        if is_open_day(d):
+            open_dates.append(d.isoformat())
+
+            if build_slots_for_day(d):
+                available_dates.append(d.isoformat())
+
+    # earliest bookable date (open + has slots)
+    soonest_available = available_dates[0] if available_dates else None
+
+    # -----------------------------
+    # Determine selected day
+    # -----------------------------
+    redirected_message = None
+
+    if selected_date:
+        try:
+            day = datetime.fromisoformat(selected_date).date()
+        except ValueError:
+            day = today
+            selected_date = day.isoformat()
+
+        # No past dates
+        if day < today:
+            day = today
+            selected_date = day.isoformat()
+
+        # If business is closed that day, bounce to soonest available with message
+        if soonest_available and selected_date not in open_dates:
+            redirected_message = "This business is not open this day. You have returned to the soonest appointment."
+            selected_date = soonest_available
+            day = datetime.fromisoformat(selected_date).date()
+
+        # If business is open but fully booked, also bounce to soonest available with message
+        elif soonest_available and selected_date in open_dates and selected_date not in available_dates:
+            redirected_message = "No appointments available for this day. You have returned to the soonest appointment."
+            selected_date = soonest_available
+            day = datetime.fromisoformat(selected_date).date()
+
     else:
-        # Weekly schedule fallback
-        weekday = day.weekday()
-        bh = BusinessHour.query.filter_by(weekday=weekday).first()
+        # Default to closest day that has availability
+        if soonest_available:
+            selected_date = soonest_available
+            day = datetime.fromisoformat(selected_date).date()
+        else:
+            day = today
+            selected_date = day.isoformat()
 
-        if not bh or bh.is_closed:
-            return render_template("book_slots.html", selected_date=selected_date, slots=[], error=None)
+    slots = build_slots_for_day(day)
 
-        day_start = datetime.combine(day, bh.start_time)
-        day_end = datetime.combine(day, bh.end_time)
+    # Use error slot for the bounce message (so it displays without template changes)
+    if redirected_message and not error:
+        error = redirected_message
 
-        if day_end <= day_start:
-            return render_template("book_slots.html", selected_date=selected_date, slots=[], error="Business hours invalid for this day.")
+    return render_template(
+        "book_slots.html",
+        selected_date=selected_date,
+        slots=slots,
+        error=error,
+        today=today.isoformat(),
+        # available_dates: open + has slots (for booking)
+        available_dates=available_dates,
+        # open_dates: open days (for calendar greying-out closed days)
+        open_dates=open_dates,
+    )
 
-    booked = Appointment.query.filter(
-        Appointment.start_at >= day_start,
-        Appointment.start_at < day_end,
-        Appointment.status == "scheduled",
-    ).all()
-    booked_starts = {a.start_at for a in booked}
 
-    slots = []
-    cur = day_start
-    while cur + timedelta(minutes=APPT_MINUTES) <= day_end:
-        if cur not in booked_starts:
-            slots.append(cur)
-        cur += timedelta(minutes=SLOT_STEP_MINUTES)
-
-    return render_template("book_slots.html", selected_date=selected_date, slots=slots, error=error)
-
-# -----------------------------
 # Business Area
 # -----------------------------
-@app.route("/business")
+@app.route("/business", methods=["GET", "POST"])
 @require_role("business")
 def business_dashboard():
-    return render_template("business_dashboard.html")
-
-
-@app.route("/business/hours", methods=["GET", "POST"])
-@require_role("business")
-def business_hours():
     day_names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 
     if request.method == "POST":
@@ -312,22 +471,25 @@ def business_hours():
 
             row = BusinessHour.query.filter_by(weekday=i).first()
             if not row:
-                row = BusinessHour(weekday=i, start_time=time(9, 0), end_time=time(17, 0), is_closed=False)
+                row = BusinessHour(
+                    weekday=i,
+                    start_time=time(9, 0),
+                    end_time=time(17, 0),
+                    is_closed=False
+                )
                 db.session.add(row)
 
             if closed:
                 row.is_closed = True
             else:
                 row.is_closed = False
-
                 st = parse_time_or_none(start_str) or row.start_time or time(9, 0)
                 et = parse_time_or_none(end_str) or row.end_time or time(17, 0)
-
                 row.start_time = st
                 row.end_time = et
 
         db.session.commit()
-        return redirect(url_for("business_hours"))
+        return redirect(url_for("business_dashboard"))
 
     rows = {bh.weekday: bh for bh in BusinessHour.query.all()}
     hours = []
@@ -336,14 +498,22 @@ def business_hours():
         bh = rows.get(i)
         if not bh:
             default_closed = i in (5, 6)
-            bh = BusinessHour(weekday=i, start_time=time(9, 0), end_time=time(17, 0), is_closed=default_closed)
+            bh = BusinessHour(
+                weekday=i,
+                start_time=time(9, 0),
+                end_time=time(17, 0),
+                is_closed=default_closed
+            )
             db.session.add(bh)
             db.session.commit()
 
-        hours.append({"weekday": i, "name": day_names[i], "row": bh})
+        hours.append({
+            "weekday": i,
+            "name": day_names[i],
+            "row": bh
+        })
 
-    return render_template("business_hours.html", hours=hours)
-
+    return render_template("business_dashboard.html", hours=hours)
 
 @app.route("/business/overrides", methods=["GET", "POST"])
 @require_role("business")
@@ -400,6 +570,88 @@ def delete_override(override_id):
     db.session.delete(row)
     db.session.commit()
     return redirect(url_for("business_overrides"))
+
+@app.route("/business/reports")
+@require_role("business")
+def business_reports():
+    today = datetime.now().date()
+    tomorrow = today + timedelta(days=1)
+    week_end = today + timedelta(days=7)
+
+    total_appointments = Appointment.query.filter_by(status="scheduled").count()
+
+    appointments_today = (
+        Appointment.query
+        .filter(
+            Appointment.status == "scheduled",
+            Appointment.start_at >= datetime.combine(today, time(0, 0)),
+            Appointment.start_at < datetime.combine(tomorrow, time(0, 0)),
+        )
+        .count()
+    )
+
+    appointments_this_week = (
+        Appointment.query
+        .filter(
+            Appointment.status == "scheduled",
+            Appointment.start_at >= datetime.combine(today, time(0, 0)),
+            Appointment.start_at < datetime.combine(week_end, time(0, 0)),
+        )
+        .count()
+    )
+
+    upcoming_appointments = (
+        Appointment.query
+        .options(joinedload(Appointment.user))
+        .filter(
+            Appointment.status == "scheduled",
+            Appointment.start_at >= datetime.now(),
+        )
+        .order_by(Appointment.start_at.asc())
+        .limit(10)
+        .all()
+    )
+
+    return render_template(
+        "business_reports.html",
+        total_appointments=total_appointments,
+        appointments_today=appointments_today,
+        appointments_this_week=appointments_this_week,
+        upcoming_appointments=upcoming_appointments,
+    )
+
+@app.route("/business/appointments")
+@require_role("business")
+def business_appointments():
+    appointments = (
+        Appointment.query
+        .options(joinedload(Appointment.user))
+        .filter(
+            Appointment.status == "scheduled",
+            Appointment.start_at >= datetime.now()
+        )
+        .order_by(Appointment.start_at.asc())
+        .all()
+    )
+
+    return render_template("business_appointments.html", appointments=appointments)
+
+
+@app.route("/business/appointments/archive")
+@require_role("business")
+def business_appointments_archive():
+    appointments = (
+        Appointment.query
+        .options(joinedload(Appointment.user))
+        .filter(
+            Appointment.status == "scheduled",
+            Appointment.start_at < datetime.now()
+        )
+        .order_by(Appointment.start_at.desc())
+        .all()
+    )
+
+    return render_template("business_appointments_archive.html", appointments=appointments)
 
 # -----------------------------
 # Admin Area
