@@ -6,8 +6,8 @@
 </head>
 <body class="bg-light">
 
-  <div class="container py-5" style="max-width: 1000px;">
-    <div class="d-flex justify-content-between align-items-center mb-3">
+  <div class="container py-5" style="max-width: 950px;">
+    <div class="d-flex justify-content-between align-items-center mb-4">
       <h1 class="m-0">Scheduled Appointments</h1>
 
       <div class="d-flex gap-2">
@@ -23,40 +23,44 @@
       </div>
     </div>
 
-    <div class="card shadow-sm">
-      <div class="card-body">
-
-        {% if appointments %}
-          <div class="table-responsive">
-            <table class="table table-striped align-middle">
-              <thead>
-                <tr>
-                  <th>Client Name</th>
-                  <th>Email</th>
-                  <th>Phone</th>
-                  <th>Date</th>
-                  <th>Time</th>
-                </tr>
-              </thead>
-              <tbody>
-                {% for appt in appointments %}
-                  <tr>
-                    <td>{{ appt.user.full_name }}</td>
-                    <td>{{ appt.user.email }}</td>
-                    <td>{{ appt.user.phone or "N/A" }}</td>
-                    <td>{{ appt.start_at.strftime("%A, %B %d, %Y") }}</td>
-                    <td>{{ appt.start_at.strftime("%I:%M %p") }}</td>
-                  </tr>
-                {% endfor %}
-              </tbody>
-            </table>
+    {% if grouped_appointments %}
+      {% for day, appointments in grouped_appointments.items() %}
+        <div class="card shadow-sm mb-4">
+          <div class="card-header bg-white">
+            <h4 class="mb-0">{{ day.strftime("%A, %B %d, %Y") }}</h4>
           </div>
-        {% else %}
+          <div class="card-body p-0">
+            <div class="list-group list-group-flush">
+              {% for appt in appointments %}
+                <div class="list-group-item py-3">
+                  <div class="row align-items-center">
+                    <div class="col-md-2">
+                      <strong>{{ appt.start_at.strftime("%I:%M %p") }}</strong>
+                    </div>
+                    <div class="col-md-3">
+                      {{ appt.user.full_name }}
+                    </div>
+                    <div class="col-md-4 text-muted">
+                      {{ appt.user.email }}
+                    </div>
+                    <div class="col-md-3 text-muted">
+                      {{ appt.user.phone or "N/A" }}
+                    </div>
+                  </div>
+                </div>
+              {% endfor %}
+            </div>
+          </div>
+        </div>
+      {% endfor %}
+    {% else %}
+      <div class="card shadow-sm">
+        <div class="card-body">
           <p class="mb-0">No upcoming appointments are currently scheduled.</p>
-        {% endif %}
-
+        </div>
       </div>
-    </div>
+    {% endif %}
+
   </div>
 
 </body>

@@ -585,7 +585,17 @@ def business_appointments():
         .all()
     )
 
-    return render_template("business_appointments.html", appointments=appointments)
+    grouped_appointments = {}
+    for appt in appointments:
+        day = appt.start_at.date()
+        if day not in grouped_appointments:
+            grouped_appointments[day] = []
+        grouped_appointments[day].append(appt)
+
+    return render_template(
+        "business_appointments.html",
+        grouped_appointments=grouped_appointments
+    )
 
 
 @app.route("/business/appointments/archive")
@@ -701,7 +711,19 @@ def admin_appointments():
         )
 
     appointments = query.order_by(Appointment.start_at.asc()).all()
-    return render_template("admin_appointments.html", appointments=appointments, q=q)
+
+    grouped_appointments = {}
+    for appt in appointments:
+        day = appt.start_at.date()
+        if day not in grouped_appointments:
+            grouped_appointments[day] = []
+        grouped_appointments[day].append(appt)
+
+    return render_template(
+        "admin_appointments.html",
+        grouped_appointments=grouped_appointments,
+        q=q
+    )
 
 
 @app.route("/admin/appointments/archive")
