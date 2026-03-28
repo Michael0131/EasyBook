@@ -614,6 +614,19 @@ def business_appointments_archive():
 
     return render_template("business_appointments_archive.html", appointments=appointments)
 
+@app.route("/business/appointments/<int:appointment_id>/cancel", methods=["POST"])
+@require_role("business")
+def business_cancel_appointment(appointment_id):
+    appt = Appointment.query.get_or_404(appointment_id)
+
+    if appt.start_at < datetime.now():
+        return redirect(url_for("business_appointments_archive"))
+
+    db.session.delete(appt)
+    db.session.commit()
+
+    return redirect(url_for("business_appointments"))
+
 # -----------------------------
 # Admin Area
 # -----------------------------

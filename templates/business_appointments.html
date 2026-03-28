@@ -6,7 +6,7 @@
 </head>
 <body class="bg-light">
 
-  <div class="container py-5" style="max-width: 950px;">
+  <div class="container py-5" style="max-width: 1050px;">
     <div class="d-flex justify-content-between align-items-center mb-4">
       <h1 class="m-0">Scheduled Appointments</h1>
 
@@ -37,14 +37,31 @@
                     <div class="col-md-2">
                       <strong>{{ appt.start_at.strftime("%I:%M %p") }}</strong>
                     </div>
+
                     <div class="col-md-3">
                       {{ appt.user.full_name }}
                     </div>
-                    <div class="col-md-4 text-muted">
+
+                    <div class="col-md-3 text-muted">
                       {{ appt.user.email }}
                     </div>
-                    <div class="col-md-3 text-muted">
+
+                    <div class="col-md-2 text-muted">
                       {{ appt.user.phone or "N/A" }}
+                    </div>
+
+                    <div class="col-md-2 text-end">
+                      <button
+                        type="button"
+                        class="btn btn-danger btn-sm"
+                        data-bs-toggle="modal"
+                        data-bs-target="#confirmRemoveModal"
+                        data-appointment-id="{{ appt.id }}"
+                        data-client-name="{{ appt.user.full_name }}"
+                        data-appointment-time="{{ appt.start_at.strftime('%A, %B %d, %Y at %I:%M %p') }}"
+                      >
+                        Remove
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -60,8 +77,50 @@
         </div>
       </div>
     {% endif %}
-
   </div>
+
+  <!-- Confirmation Modal -->
+  <div class="modal fade" id="confirmRemoveModal" tabindex="-1" aria-labelledby="confirmRemoveModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="confirmRemoveModalLabel">Confirm Removal</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+
+        <div class="modal-body">
+          <p class="mb-2">Are you sure you want to remove this appointment?</p>
+          <p class="mb-1"><strong>Client:</strong> <span id="modalClientName"></span></p>
+          <p class="mb-0"><strong>Time:</strong> <span id="modalAppointmentTime"></span></p>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+
+          <form method="POST" id="confirmRemoveForm">
+            <button type="submit" class="btn btn-danger">Remove Appointment</button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+  <script>
+    const confirmRemoveModal = document.getElementById('confirmRemoveModal');
+
+    confirmRemoveModal.addEventListener('show.bs.modal', function (event) {
+      const button = event.relatedTarget;
+
+      const appointmentId = button.getAttribute('data-appointment-id');
+      const clientName = button.getAttribute('data-client-name');
+      const appointmentTime = button.getAttribute('data-appointment-time');
+
+      document.getElementById('modalClientName').textContent = clientName;
+      document.getElementById('modalAppointmentTime').textContent = appointmentTime;
+      document.getElementById('confirmRemoveForm').action = `/business/appointments/${appointmentId}/cancel`;
+    });
+  </script>
 
 </body>
 </html>
