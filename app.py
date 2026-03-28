@@ -620,6 +620,39 @@ def business_reports():
         upcoming_appointments=upcoming_appointments,
     )
 
+@app.route("/business/appointments")
+@require_role("business")
+def business_appointments():
+    appointments = (
+        Appointment.query
+        .options(joinedload(Appointment.user))
+        .filter(
+            Appointment.status == "scheduled",
+            Appointment.start_at >= datetime.now()
+        )
+        .order_by(Appointment.start_at.asc())
+        .all()
+    )
+
+    return render_template("business_appointments.html", appointments=appointments)
+
+
+@app.route("/business/appointments/archive")
+@require_role("business")
+def business_appointments_archive():
+    appointments = (
+        Appointment.query
+        .options(joinedload(Appointment.user))
+        .filter(
+            Appointment.status == "scheduled",
+            Appointment.start_at < datetime.now()
+        )
+        .order_by(Appointment.start_at.desc())
+        .all()
+    )
+
+    return render_template("business_appointments_archive.html", appointments=appointments)
+
 # -----------------------------
 # Admin Area
 # -----------------------------
