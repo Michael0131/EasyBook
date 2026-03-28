@@ -585,7 +585,17 @@ def business_appointments():
         .all()
     )
 
-    return render_template("business_appointments.html", appointments=appointments)
+    grouped_appointments = {}
+    for appt in appointments:
+        day = appt.start_at.date()
+        if day not in grouped_appointments:
+            grouped_appointments[day] = []
+        grouped_appointments[day].append(appt)
+
+    return render_template(
+        "business_appointments.html",
+        grouped_appointments=grouped_appointments
+    )
 
 
 @app.route("/business/appointments/archive")
@@ -603,6 +613,19 @@ def business_appointments_archive():
     )
 
     return render_template("business_appointments_archive.html", appointments=appointments)
+
+@app.route("/business/appointments/<int:appointment_id>/cancel", methods=["POST"])
+@require_role("business")
+def business_cancel_appointment(appointment_id):
+    appt = Appointment.query.get_or_404(appointment_id)
+
+    if appt.start_at < datetime.now():
+        return redirect(url_for("business_appointments_archive"))
+
+    db.session.delete(appt)
+    db.session.commit()
+
+    return redirect(url_for("business_appointments"))
 
 # -----------------------------
 # Admin Area
@@ -701,7 +724,19 @@ def admin_appointments():
         )
 
     appointments = query.order_by(Appointment.start_at.asc()).all()
-    return render_template("admin_appointments.html", appointments=appointments, q=q)
+
+    grouped_appointments = {}
+    for appt in appointments:
+        day = appt.start_at.date()
+        if day not in grouped_appointments:
+            grouped_appointments[day] = []
+        grouped_appointments[day].append(appt)
+
+    return render_template(
+        "admin_appointments.html",
+        grouped_appointments=grouped_appointments,
+        q=q
+    )
 
 
 @app.route("/admin/appointments/archive")
