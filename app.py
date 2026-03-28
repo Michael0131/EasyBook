@@ -515,53 +515,6 @@ def business_dashboard():
 
     return render_template("business_dashboard.html", hours=hours)
 
-
-@app.route("/business/hours", methods=["GET", "POST"])
-@require_role("business")
-def business_hours():
-    day_names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
-
-    if request.method == "POST":
-        for i in range(7):
-            closed = request.form.get(f"closed_{i}") == "on"
-            start_str = request.form.get(f"start_{i}", "")
-            end_str = request.form.get(f"end_{i}", "")
-
-            row = BusinessHour.query.filter_by(weekday=i).first()
-            if not row:
-                row = BusinessHour(weekday=i, start_time=time(9, 0), end_time=time(17, 0), is_closed=False)
-                db.session.add(row)
-
-            if closed:
-                row.is_closed = True
-            else:
-                row.is_closed = False
-
-                st = parse_time_or_none(start_str) or row.start_time or time(9, 0)
-                et = parse_time_or_none(end_str) or row.end_time or time(17, 0)
-
-                row.start_time = st
-                row.end_time = et
-
-        db.session.commit()
-        return redirect(url_for("business_hours"))
-
-    rows = {bh.weekday: bh for bh in BusinessHour.query.all()}
-    hours = []
-
-    for i in range(7):
-        bh = rows.get(i)
-        if not bh:
-            default_closed = i in (5, 6)
-            bh = BusinessHour(weekday=i, start_time=time(9, 0), end_time=time(17, 0), is_closed=default_closed)
-            db.session.add(bh)
-            db.session.commit()
-
-        hours.append({"weekday": i, "name": day_names[i], "row": bh})
-
-    return render_template("business_hours.html", hours=hours)
-
-
 @app.route("/business/overrides", methods=["GET", "POST"])
 @require_role("business")
 def business_overrides():
