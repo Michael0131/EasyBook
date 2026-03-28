@@ -687,10 +687,33 @@ def admin_update_role(account_id):
 def admin_appointments():
     q = request.args.get("q", "").strip().lower()
 
-    query = Appointment.query.options(joinedload(Appointment.user))
+    query = Appointment.query.options(joinedload(Appointment.user)).filter(
+        Appointment.start_at >= datetime.now()
+    )
 
     if q:
-        # Search by linked account fields
+        query = query.join(Account, Account.id == Appointment.user_id).filter(
+            or_(
+                Account.email.ilike(f"%{q}%"),
+                Account.first_name.ilike(f"%{q}%"),
+                Account.last_name.ilike(f"%{q}%"),
+            )
+        )
+
+    appointments = query.order_by(Appointment.start_at.asc()).all()
+    return render_template("admin_appointments.html", appointments=appointments, q=q)
+
+
+@app.route("/admin/appointments/archive")
+@require_role("admin")
+def admin_appointments_archive():
+    q = request.args.get("q", "").strip().lower()
+
+    query = Appointment.query.options(joinedload(Appointment.user)).filter(
+        Appointment.start_at < datetime.now()
+    )
+
+    if q:
         query = query.join(Account, Account.id == Appointment.user_id).filter(
             or_(
                 Account.email.ilike(f"%{q}%"),
@@ -700,13 +723,16 @@ def admin_appointments():
         )
 
     appointments = query.order_by(Appointment.start_at.desc()).all()
-    return render_template("admin_appointments.html", appointments=appointments, q=q)
-
+    return render_template("admin_appointments_archive.html", appointments=appointments, q=q)
 
 @app.route("/admin/appointments/<int:appointment_id>/cancel", methods=["POST"])
 @require_role("admin")
 def admin_cancel_appointment(appointment_id):
     appt = Appointment.query.get_or_404(appointment_id)
+
+    if appt.start_at < datetime.now():
+        return redirect(url_for("admin_appointments_archive"))
+
     db.session.delete(appt)
     db.session.commit()
     return redirect(url_for("admin_appointments"))
