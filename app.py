@@ -571,55 +571,6 @@ def delete_override(override_id):
     db.session.commit()
     return redirect(url_for("business_overrides"))
 
-@app.route("/business/reports")
-@require_role("business")
-def business_reports():
-    today = datetime.now().date()
-    tomorrow = today + timedelta(days=1)
-    week_end = today + timedelta(days=7)
-
-    total_appointments = Appointment.query.filter_by(status="scheduled").count()
-
-    appointments_today = (
-        Appointment.query
-        .filter(
-            Appointment.status == "scheduled",
-            Appointment.start_at >= datetime.combine(today, time(0, 0)),
-            Appointment.start_at < datetime.combine(tomorrow, time(0, 0)),
-        )
-        .count()
-    )
-
-    appointments_this_week = (
-        Appointment.query
-        .filter(
-            Appointment.status == "scheduled",
-            Appointment.start_at >= datetime.combine(today, time(0, 0)),
-            Appointment.start_at < datetime.combine(week_end, time(0, 0)),
-        )
-        .count()
-    )
-
-    upcoming_appointments = (
-        Appointment.query
-        .options(joinedload(Appointment.user))
-        .filter(
-            Appointment.status == "scheduled",
-            Appointment.start_at >= datetime.now(),
-        )
-        .order_by(Appointment.start_at.asc())
-        .limit(10)
-        .all()
-    )
-
-    return render_template(
-        "business_reports.html",
-        total_appointments=total_appointments,
-        appointments_today=appointments_today,
-        appointments_this_week=appointments_this_week,
-        upcoming_appointments=upcoming_appointments,
-    )
-
 @app.route("/business/appointments")
 @require_role("business")
 def business_appointments():
