@@ -614,9 +614,12 @@ def business_appointments_archive():
 
     return render_template("business_appointments_archive.html", appointments=appointments)
 
-@app.route("/business/appointments/<int:appointment_id>/cancel", methods=["POST"])
+@app.route("/business/appointments/<int:appointment_id>/cancel", methods=["GET", "POST"])
 @require_role("business")
 def business_cancel_appointment(appointment_id):
+    if request.method == "GET":
+        return redirect(url_for("business_appointments"))
+
     appt = Appointment.query.get_or_404(appointment_id)
 
     if appt.start_at < datetime.now():
