@@ -17,6 +17,18 @@
   </nav>
 
   <div class="container py-5" style="max-width: 900px;">
+    
+    <!-- Flash Messages -->
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          <div class="alert alert-success">
+            {{ message }}
+          </div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+
     <div class="card shadow-sm">
       <div class="card-body">
         <h1 class="card-title mb-4">My Upcoming Appointments</h1>
@@ -39,11 +51,17 @@
                     <td>{{ appt.start_at.strftime("%I:%M %p") }}</td>
                     <td>{{ appt.status.title() }}</td>
                     <td class="text-end">
-                      <form method="POST" action="{{ url_for('cancel_appointment', appointment_id=appt.id) }}" style="display:inline;">
-                        <button type="submit" class="btn btn-danger btn-sm">
-                          Cancel Appointment
-                        </button>
-                      </form>
+                      
+                      <!-- Modal Trigger Button -->
+                      <button 
+                        class="btn btn-danger btn-sm"
+                        data-bs-toggle="modal"
+                        data-bs-target="#cancelModal"
+                        data-appointment-id="{{ appt.id }}"
+                        data-appointment-time="{{ appt.start_at.strftime('%A, %B %d, %Y at %I:%M %p') }}">
+                        Cancel Appointment
+                      </button>
+
                     </td>
                   </tr>
                 {% endfor %}
@@ -56,6 +74,55 @@
       </div>
     </div>
   </div>
+
+  <!-- Cancel Confirmation Modal -->
+  <div class="modal fade" id="cancelModal" tabindex="-1">
+    <div class="modal-dialog">
+      <div class="modal-content">
+
+        <div class="modal-header">
+          <h5 class="modal-title">Cancel Appointment</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+
+        <div class="modal-body">
+          <p>Are you sure you want to cancel this appointment?</p>
+          <p class="fw-bold" id="modalAppointmentTime"></p>
+        </div>
+
+        <div class="modal-footer">
+          <form method="POST" id="confirmCancelForm">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+              No
+            </button>
+            <button type="submit" class="btn btn-danger">
+              Yes, Cancel
+            </button>
+          </form>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- Bootstrap JS (needed for modal) -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+
+  <!-- Modal Logic -->
+  <script>
+    const cancelModal = document.getElementById('cancelModal');
+
+    cancelModal.addEventListener('show.bs.modal', function (event) {
+      const button = event.relatedTarget;
+
+      const appointmentId = button.getAttribute('data-appointment-id');
+      const appointmentTime = button.getAttribute('data-appointment-time');
+
+      document.getElementById('modalAppointmentTime').textContent = appointmentTime;
+      document.getElementById('confirmCancelForm').action =
+        `/appointments/${appointmentId}/cancel`;
+    });
+  </script>
 
 </body>
 </html>

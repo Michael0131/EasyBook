@@ -53,17 +53,24 @@ def init_app(app):
     @require_role("user")
     def cancel_appointment(appointment_id):
 
-        # Retrieve appointment or return 404 if not found
+        # Retrieve the appointment from the database
+        # If it doesn't exist, Flask will automatically return a 404 error
         appt = Appointment.query.get_or_404(appointment_id)
 
-        # Prevent user from cancelling someone else's appointment
+        # Security check:
+        # Ensure the logged-in user owns this appointment
+        # Prevents users from cancelling other users' appointments
         if appt.user_id != session.get("account_id"):
-            abort(403)
+            abort(403)  # Forbidden access
 
-        # Mark appointment as cancelled (soft delete)
+        # Instead of deleting the appointment, mark it as cancelled
+        # This preserves history for reporting and auditing
         appt.status = "cancelled"
+
+        # Save the change to the database
         db.session.commit()
 
+        # Redirect back to the user's appointments page
         return redirect(url_for("my_appointments"))
 
 
