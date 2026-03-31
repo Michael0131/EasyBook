@@ -303,7 +303,7 @@ def init_app(app):
         cancelled = [a for a in filtered_appointments if a.status == "cancelled"]
 
         # Build one row per calendar day from the range start through today
-        # This avoids mismatches between the summary cards and the table totals
+        # Only include days that actually have appointments, so the table stays compact
         scheduled_by_day = []
         cancelled_by_day = []
 
@@ -321,15 +321,18 @@ def init_app(app):
                 if a.start_at.date() == day_cursor
             )
 
-            scheduled_by_day.append({
-                "date": day_cursor,
-                "count": scheduled_count,
-            })
+            # Only add rows with non-zero counts
+            if scheduled_count > 0:
+                scheduled_by_day.append({
+                    "date": day_cursor,
+                    "count": scheduled_count,
+                })
 
-            cancelled_by_day.append({
-                "date": day_cursor,
-                "count": cancelled_count,
-            })
+            if cancelled_count > 0:
+                cancelled_by_day.append({
+                    "date": day_cursor,
+                    "count": cancelled_count,
+                })
 
             day_cursor += timedelta(days=1)
 

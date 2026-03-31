@@ -91,12 +91,20 @@
                   </tr>
                 </thead>
                 <tbody>
-                  {% for row in scheduled_by_day %}
-                  <tr>
-                    <td>{{ row.date }}</td>
-                    <td>{{ row.count }}</td>
-                  </tr>
-                  {% endfor %}
+                  {% if scheduled_by_day %}
+                    {% for row in scheduled_by_day %}
+                    <tr>
+                      <td>{{ row.date }}</td>
+                      <td>{{ row.count }}</td>
+                    </tr>
+                    {% endfor %}
+                  {% else %}
+                    <tr>
+                      <td colspan="2" class="text-muted text-center">
+                        No scheduled appointments in this range
+                      </td>
+                    </tr>
+                  {% endif %}
                 </tbody>
               </table>
             </div>
@@ -119,12 +127,20 @@
                   </tr>
                 </thead>
                 <tbody>
-                  {% for row in cancelled_by_day %}
-                  <tr>
-                    <td>{{ row.date }}</td>
-                    <td>{{ row.count }}</td>
-                  </tr>
-                  {% endfor %}
+                  {% if cancelled_by_day %}
+                    {% for row in cancelled_by_day %}
+                    <tr>
+                      <td>{{ row.date }}</td>
+                      <td>{{ row.count }}</td>
+                    </tr>
+                    {% endfor %}
+                  {% else %}
+                    <tr>
+                      <td colspan="2" class="text-muted text-center">
+                        No cancelled appointments in this range
+                      </td>
+                    </tr>
+                  {% endif %}
                 </tbody>
               </table>
             </div>
