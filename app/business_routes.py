@@ -1,5 +1,5 @@
 # Import datetime utilities for working with dates and times
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 
 # Flask utilities for rendering templates, handling requests, and redirects
 from flask import redirect, render_template, request, url_for
@@ -241,15 +241,104 @@ def init_app(app):
         if request.method == "GET":
             return redirect(url_for("business_appointments"))
 
-        # Retrieve appointment or return 404
+        # Retrieve appointment or return 404 if not found
         appt = Appointment.query.get_or_404(appointment_id)
 
-        # If appointment is already in the past, redirect to archive
+        # If appointment is already in the past, redirect to archive view
+        # (past appointments should not be modified)
         if appt.start_at < datetime.now():
             return redirect(url_for("business_appointments_archive"))
 
-        # Delete appointment from database
-        db.session.delete(appt)
+        # Instead of deleting the appointment, mark it as cancelled
+        # This preserves data for reporting and analytics
+        appt.status = "cancelled"
+
+        # Save changes to the database
         db.session.commit()
 
+        # Redirect back to upcoming appointments view
         return redirect(url_for("business_appointments"))
+    
+
+    # -----------------------------
+    # BUSINESS REPORTS
+    # -----------------------------
+    @app.route("/business/reports")
+    @require_role("business")
+    def business_reports():
+        now_dt = datetime.now()
+
+        # Get selected filter from dropdown
+        range_key = request.args.get("range", "7d")
+
+        # Map dropdown values to time ranges
+        range_map = {
+            "24h": timedelta(hours=24),
+            "7d": timedelta(days=7),
+            "14d": timedelta(days=14),
+            "30d": timedelta(days=30),
+            "182d": timedelta(days=182),
+            "365d": timedelta(days=365),
+        }
+
+        # Default to 7 days if invalid value is passed
+        selected_delta = range_map.get(range_key, timedelta(days=7))
+        range_start = now_dt - selected_delta
+
+        # Load all appointments with related user data
+        appointments = (
+            Appointment.query.options(joinedload(Appointment.user))
+            .order_by(Appointment.start_at.asc())
+            .all()
+        )
+
+        # Only include appointments whose appointment time falls inside the selected range
+        filtered_appointments = [
+            a for a in appointments
+            if range_start <= a.start_at <= now_dt
+        ]
+
+        # Separate filtered appointments by status
+        scheduled = [a for a in filtered_appointments if a.status == "scheduled"]
+        cancelled = [a for a in filtered_appointments if a.status == "cancelled"]
+
+        # Build one row per calendar day from the range start through today
+        # This avoids mismatches between the summary cards and the table totals
+        scheduled_by_day = []
+        cancelled_by_day = []
+
+        day_cursor = range_start.date()
+        end_date = now_dt.date()
+
+        while day_cursor <= end_date:
+            scheduled_count = sum(
+                1 for a in scheduled
+                if a.start_at.date() == day_cursor
+            )
+
+            cancelled_count = sum(
+                1 for a in cancelled
+                if a.start_at.date() == day_cursor
+            )
+
+            scheduled_by_day.append({
+                "date": day_cursor,
+                "count": scheduled_count,
+            })
+
+            cancelled_by_day.append({
+                "date": day_cursor,
+                "count": cancelled_count,
+            })
+
+            day_cursor += timedelta(days=1)
+
+        return render_template(
+            "business_reports.html",
+            total_appointments=len(filtered_appointments),
+            scheduled_count=len(scheduled),
+            cancelled_count=len(cancelled),
+            scheduled_by_day=scheduled_by_day,
+            cancelled_by_day=cancelled_by_day,
+            selected_range=range_key,
+        )
